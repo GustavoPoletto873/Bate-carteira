@@ -10,7 +10,7 @@ export async function GET(req: Request) {
     const id = obrigatorio(q, "id", "o ID da carteira").replace(/\D/g, "");
     const data = obrigatorio(q, "data", "a data-base");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new ErroDrive("Data-base inválida (use aaaa-mm-dd).");
-    const bytes = await composicaoCarteira(id, data);
+    const bytes = await composicaoCarteira(q.get("adm"), id, data);
     return new Response(new Blob([bytes as Uint8Array<ArrayBuffer>]), {
       headers: {
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

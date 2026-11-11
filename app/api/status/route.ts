@@ -1,17 +1,18 @@
 import { ehLocal, verificarAcesso } from "@/lib/servidor/acesso";
-import { BRITECH_URL, britechConfigurada, CHAVE_ACESSO, DRIVE_BASE_PADRAO } from "@/lib/servidor/config";
+import { BRITECH_URL, CHAVE_ACESSO, DRIVE_BASE_PADRAO, instanciasBritech } from "@/lib/servidor/config";
 import { driveDisponivel } from "@/lib/servidor/drive-local";
 
 /** O que está disponível neste servidor (sem segredos). Sem acesso liberado, só diz que a chave é necessária. */
 export async function GET(req: Request) {
   const local = ehLocal(req);
   const liberado = verificarAcesso(req) === null;
+  const britech = liberado ? instanciasBritech().map((i) => ({ adm: i.adm, nome: i.nome })) : [];
   return Response.json({
     local,
-    exigeChave: !local,
+    exigeChave: !liberado || (!local && !!CHAVE_ACESSO && !!req.headers.get("x-lastro-chave")),
     chaveConfigurada: !!CHAVE_ACESSO,
     liberado,
     drive: liberado ? { disponivel: await driveDisponivel(), base: DRIVE_BASE_PADRAO } : { disponivel: false, base: "" },
-    britech: liberado ? { configurada: britechConfigurada(), url: BRITECH_URL } : { configurada: false, url: "" },
+    britech: { configurada: britech.length > 0, url: liberado ? BRITECH_URL : "", administradoras: britech },
   });
 }

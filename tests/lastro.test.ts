@@ -201,6 +201,11 @@ describe("escolha da carteira Britech", () => {
     expect(r.padrao).toBe("7700");
     expect(r.opcoes[0].nome).toContain("deduzida");
   });
+  it("a carteira deduzida fica na mesma Britech (administradora) das subclasses", () => {
+    const daId = subclasses.map((c) => ({ ...c, adm: "ID", admNome: "ID" }));
+    expect(opcoesDeCarteira(daId).opcoes[0]).toMatchObject({ id: "7700", adm: "ID", admNome: "ID" });
+    expect(opcoesDeCarteira(daId, "55").opcoes[0]).toMatchObject({ id: "55", adm: "ID" });
+  });
 });
 
 describe("conferência", () => {

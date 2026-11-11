@@ -3,10 +3,11 @@
 import { FileSpreadsheet, FolderOpen, Landmark, Loader2, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArquivoEntrada } from "@/lib/lastro/pipeline";
-import { opcoesDeCarteira } from "@/lib/lastro/carteiras";
+import { opcoesDeCarteira, type OpcaoCarteira } from "@/lib/lastro/carteiras";
+import type { Administradora, ProvedorDrive } from "@/lib/lastro/drive-comum";
 import { lerWorkpaper, type Workpaper } from "@/lib/lastro/planilhas";
 import {
-  servidor, type CarteiraBritech, type CarteiraFormatada, type FundoDrive, type PastaLastro, type StatusServidor,
+  servidor, type ArquivoDeRecebiveis, type CarteiraFormatada, type FundoDrive, type PastaLastro, type StatusServidor,
 } from "@/lib/lastro/servidor-cliente";
 import { fmtData, normalizar } from "@/lib/lastro/textos";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,8 @@ const fmtCnpj = (c: string) =>
   c.length === 14 ? `${c.slice(0, 2)}.${c.slice(2, 5)}.${c.slice(5, 8)}/${c.slice(8, 12)}-${c.slice(12)}` : c;
 const nomeDaPasta = (caminho: string) => caminho.split(/[\\/]/).filter(Boolean).pop() ?? caminho;
 const fmtDia = (iso: string) => (iso ? new Date(iso).toLocaleDateString("pt-BR") : "");
+/** WP_Termo de direitos creditórios (linhas com sacado/cedente) — a carteira certa é a amostra/estoque, não a Britech. */
+const ehDeRecebiveis = (wp: Workpaper) => wp.linhas.filter((l) => l.nomeSacado || l.nomeCedente).length > wp.linhas.length / 2;
 
 
 function SeletorFundo({ fundos, carregando, erro, escolhido, onEscolher }: {
@@ -80,36 +83,77 @@ function SeletorFundo({ fundos, carregando, erro, escolhido, onEscolher }: {
   );
 }
 
-/** Fontes buscadas sozinhas: workpaper e lastro no Drive (G:), carteira na API da Britech. */
-export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: StatusServidor }) {
-  const [base, setBase] = useState(status.drive.base);
-  const [baseAplicada, setBaseAplicada] = useState(status.drive.base);
+/** Fontes buscadas sozinhas: workpaper e lastro no Drive (G:), carteira na Britech da administradora do fundo. */
+export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: PropsFontes & {
+  status: StatusServidor; provedor: ProvedorDrive; basePadrao: string;
+}) {
+  const motivoSemBritech = status.exigeChave && !status.liberado
+    ? "Informe a chave de acesso do app (acima) para usar a API da Britech."
+    : "Credenciais da Britech não configuradas neste servidor (BRITECH_<ADM>_USUARIO e _SENHA no .env.local).";
+  const [base, setBase] = useState(basePadrao);
+  const [baseAplicada, setBaseAplicada] = useState(basePadrao);
+  const [adms, setAdms] = useState<Administradora[]>([]);
+  const [avisoBritech, setAvisoBritech] = useState("");
   const [fundos, setFundos] = useState<{ chave: string; lista: FundoDrive[]; erro: string } | null>(null);
   const [fundo, setFundo] = useState<FundoDrive | null>(null);
   const [wp, setWp] = useState<Workpaper | null>(null);
   const [wpErro, setWpErro] = useState("");
   const [carregandoWp, setCarregandoWp] = useState(false);
   const [dataBase, setDataBase] = useState("");
-  const [modoCarteira, setModoCarteira] = useState<"api" | "formatada">(status.britech.configurada ? "api" : "formatada");
-  const [carteiras, setCarteiras] = useState<{ lista: CarteiraBritech[]; erro: string } | null>(null);
+  const [modoCarteira, setModoCarteira] = useState<"api" | "drive">(status.britech.configurada ? "api" : "drive");
+  const [carteiras, setCarteiras] = useState<{ lista: OpcaoCarteira[]; erro: string } | null>(null);
   const [idCarteira, setIdCarteira] = useState("");
   const [formatada, setFormatada] = useState<CarteiraFormatada | null | undefined>(undefined);
+  const [recebiveis, setRecebiveis] = useState<ArquivoDeRecebiveis[] | undefined>(undefined);
+  const [arquivoSel, setArquivoSel] = useState("");
   const [pastas, setPastas] = useState<{ lista: PastaLastro[]; erro: string } | null>(null);
   const [pastaSel, setPastaSel] = useState("");
   const [lastro, setLastro] = useState<{ pasta: string; arquivos: ArquivoEntrada[]; erro: string } | null>(null);
   const vez = useRef(0);
   const vezPasta = useRef(0);
 
+  // administradoras do trimestre (pastas com _Workpapers): escolher uma troca a pasta de onde vêm os fundos
+  useEffect(() => {
+    let vivo = true;
+    provedor.administradoras(basePadrao)
+      .then((lista) => {
+        if (!vivo) return;
+        setAdms(lista);
+        if (lista.length && !lista.some((a) => a.base === basePadrao)) {
+          const padrao = lista.find((a) => normalizar(a.nome) === "planner") ?? lista[0];
+          setBase(padrao.base);
+          setBaseAplicada(padrao.base);
+        }
+      })
+      .catch(() => vivo && setAdms([]));
+    return () => {
+      vivo = false;
+    };
+  }, [provedor, basePadrao]);
+
+  function trocarAdministradora(novaBase: string) {
+    onMudar();
+    vez.current++;
+    setFundo(null);
+    setWp(null);
+    setCarteiras(null);
+    setPastas(null);
+    setPastaSel("");
+    setLastro(null);
+    setBase(novaBase);
+    setBaseAplicada(novaBase);
+  }
+
   const chaveFundos = baseAplicada;
   useEffect(() => {
     let vivo = true;
-    servidor.fundos(baseAplicada)
-      .then((r) => vivo && setFundos({ chave: chaveFundos, lista: r.fundos, erro: "" }))
+    provedor.fundos(baseAplicada)
+      .then((lista) => vivo && setFundos({ chave: chaveFundos, lista, erro: "" }))
       .catch((e) => vivo && setFundos({ chave: chaveFundos, lista: [], erro: mensagem(e) }));
     return () => {
       vivo = false;
     };
-  }, [baseAplicada, chaveFundos]);
+  }, [provedor, baseAplicada, chaveFundos]);
   const carregandoFundos = fundos?.chave !== chaveFundos;
 
   async function escolherPasta(caminho: string) {
@@ -119,31 +163,44 @@ export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: S
     setLastro(null);
     if (!caminho) return;
     try {
-      const arquivos = await servidor.listar(caminho);
+      const arquivos = await provedor.listar(caminho);
       if (v === vezPasta.current) setLastro({ pasta: caminho, arquivos, erro: "" });
     } catch (e) {
       if (v === vezPasta.current) setLastro({ pasta: caminho, arquivos: [], erro: mensagem(e) });
     }
   }
 
-  async function buscarCarteiras(v: number, cnpj: string, data: string) {
-    const [fmt, api] = await Promise.allSettled([
-      servidor.carteiraFormatada(baseAplicada, cnpj, data || null),
+  /**
+   * Carteira do fundo: Britech (API ou FORMATADA) e, nas administradoras sem Britech, a amostra/estoque do Drive.
+   * Fundo de recebíveis (WP_Termo com sacado/cedente) com amostra no Drive começa na amostra.
+   */
+  async function buscarCarteiras(v: number, cnpj: string, data: string, nomeFundo: string, deRecebiveis: boolean) {
+    const [fmt, rec, api] = await Promise.allSettled([
+      provedor.carteiraFormatada(baseAplicada, cnpj, data || null),
+      provedor.amostrasEstoques(baseAplicada, nomeFundo, cnpj),
       status.britech.configurada
         ? servidor.carteirasBritech(cnpj)
-        : Promise.reject(new Error("Credenciais da Britech não configuradas neste servidor (BRITECH_USUARIO e BRITECH_SENHA).")),
+        : Promise.reject(new Error(motivoSemBritech)),
     ]);
     if (v !== vez.current) return;
-    const arquivo = fmt.status === "fulfilled" ? fmt.value.carteira : null;
+    const arquivo = fmt.status === "fulfilled" ? fmt.value : null;
+    const lista = rec.status === "fulfilled" ? rec.value : [];
     setFormatada(arquivo);
+    setRecebiveis(lista);
+    const preferirDrive = deRecebiveis && lista.length > 0;
+    const temNoDrive = !!arquivo || lista.length > 0;
+    setArquivoSel(preferirDrive ? lista[0].caminho : arquivo?.caminho ?? lista[0]?.caminho ?? "");
     if (api.status === "fulfilled") {
       const { opcoes, padrao } = opcoesDeCarteira(api.value.carteiras, arquivo?.idCarteira);
-      setCarteiras({ lista: opcoes, erro: opcoes.length ? "" : "A Britech não tem carteira para este CNPJ." });
+      setCarteiras({ lista: opcoes, erro: opcoes.length ? "" : "Nenhuma Britech configurada tem carteira para este CNPJ." });
       setIdCarteira(padrao);
+      const falhas = api.value.falhas.map((f) => f.adm).join(", ");
+      setAvisoBritech(!opcoes.length && falhas ? `Não consegui consultar: ${falhas}.` : "");
+      setModoCarteira(preferirDrive || (!opcoes.length && temNoDrive) ? "drive" : "api");
     } else {
       setCarteiras({ lista: [], erro: mensagem(api.reason) });
       setIdCarteira(arquivo?.idCarteira ?? "");
-      if (arquivo) setModoCarteira("formatada");
+      if (temNoDrive) setModoCarteira("drive");
     }
   }
 
@@ -157,21 +214,23 @@ export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: S
     setCarteiras(null);
     setIdCarteira("");
     setFormatada(undefined);
+    setRecebiveis(undefined);
+    setArquivoSel("");
     setPastas(null);
     setPastaSel("");
     setLastro(null);
     try {
-      const lido = lerWorkpaper(await servidor.arquivo(f.caminho), f.arquivo);
+      const lido = lerWorkpaper(await provedor.arquivo(f.caminho), f.arquivo);
       if (v !== vez.current) return;
       setWp(lido);
       setDataBase(lido.dataBase ?? "");
       const cnpj = lido.cnpj || f.cnpj;
-      void buscarCarteiras(v, cnpj, lido.dataBase ?? "");
+      void buscarCarteiras(v, cnpj, lido.dataBase ?? "", f.fundo, ehDeRecebiveis(lido));
       try {
-        const r = await servidor.pastasLastro(baseAplicada, f.fundo, cnpj);
+        const lista = await provedor.pastasLastro(baseAplicada, f.fundo, cnpj);
         if (v !== vez.current) return;
-        setPastas({ lista: r.pastas, erro: "" });
-        const melhor = r.pastas[0];
+        setPastas({ lista, erro: "" });
+        const melhor = lista[0];
         if (melhor && melhor.pontos >= 0.5) void escolherPasta(melhor.caminho);
       } catch (e) {
         if (v === vez.current) setPastas({ lista: [], erro: mensagem(e) });
@@ -189,30 +248,44 @@ export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: S
     if (!wp) return;
     const v = vez.current;
     setFormatada(undefined);
-    servidor.carteiraFormatada(baseAplicada, wp.cnpj || fundo?.cnpj || "", valor || null)
-      .then((r) => v === vez.current && setFormatada(r.carteira))
+    provedor.carteiraFormatada(baseAplicada, wp.cnpj || fundo?.cnpj || "", valor || null)
+      .then((c) => v === vez.current && setFormatada(c))
       .catch(() => v === vez.current && setFormatada(null));
   }
 
   const dataEf = dataBase || wp?.dataBase || null;
-  const carteiraPronta = modoCarteira === "api" ? !!(idCarteira && dataEf && status.britech.configurada) : !!formatada;
+  const opcaoCarteira = carteiras?.lista.find((c) => c.id === idCarteira);
+  const nomePasta = pastas?.lista.find((p) => p.caminho === pastaSel)?.nome ?? nomeDaPasta(pastaSel);
+  const opcoesDrive = [
+    ...(formatada ? [{ caminho: formatada.caminho, arquivo: formatada.arquivo, tipo: "britech" as const, rotulo: `Carteira Britech — ${formatada.arquivo}` }] : []),
+    ...(recebiveis ?? []).map((r) => ({
+      caminho: r.caminho, arquivo: r.arquivo, tipo: r.tipo,
+      rotulo: `${r.tipo === "amostra" ? "Amostra" : "Estoque"} — ${r.pasta ? `${r.pasta}/` : ""}${r.arquivo}`,
+    })),
+  ];
+  const noDrive = opcoesDrive.find((o) => o.caminho === arquivoSel) ?? opcoesDrive[0];
+  const procurandoNoDrive = formatada === undefined || recebiveis === undefined;
+  const carteiraPronta = modoCarteira === "api" ? !!(idCarteira && dataEf && status.britech.configurada) : !!noDrive;
   const lastroPronto = !!lastro && lastro.pasta === pastaSel && !lastro.erro;
   const preparo: Preparo | null = wp && lastroPronto && carteiraPronta && lastro ? {
     workpaper: wp,
     dataBase: dataEf,
     carteira: modoCarteira === "api"
       ? {
-        rotulo: `API Britech — carteira ${idCarteira} em ${fmtData(dataEf)}`,
-        obter: async () => ({ bytes: await servidor.composicaoBritech(idCarteira, dataEf!), nome: `carteira_${idCarteira}_${dataEf}.xlsx` }),
+        rotulo: `API Britech ${opcaoCarteira?.admNome ?? ""} — carteira ${idCarteira} em ${fmtData(dataEf)}`.replace("  ", " "),
+        obter: async () => ({
+          bytes: await servidor.composicaoBritech(opcaoCarteira?.adm ?? "PLANNER", idCarteira, dataEf!),
+          nome: `carteira_${idCarteira}_${dataEf}.xlsx`,
+        }),
       }
       : {
-        rotulo: formatada!.caminho,
-        obter: async () => ({ bytes: await servidor.arquivo(formatada!.caminho), nome: formatada!.arquivo }),
+        rotulo: noDrive!.caminho.replace(/^pasta:/, ""),
+        obter: async () => ({ bytes: await provedor.arquivo(noDrive!.caminho), nome: noDrive!.arquivo }),
       },
-    lastro: { nome: nomeDaPasta(pastaSel), obter: async () => lastro.arquivos },
+    lastro: { nome: nomePasta, obter: async () => lastro.arquivos },
   } : null;
 
-  const nomeCarteira = carteiras?.lista.find((c) => c.id === idCarteira)?.nome;
+  const nomeCarteira = opcaoCarteira?.nome;
 
   return (
     <>
@@ -224,6 +297,14 @@ export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: S
           pronto={!!wp}
           descricao={<>Escolha o fundo: o app abre o <code className="text-creme/80">WP_&lt;fundo&gt;_&lt;cnpj&gt;.xlsm</code> de <code className="text-creme/80">_Workpapers</code> e usa a aba <b className="font-medium text-creme/80">WP_Termo</b>.</>}
         >
+          {adms.length > 1 && (
+            <label className="flex items-center gap-3 text-sm text-creme/70">
+              <span className="shrink-0">Administradora</span>
+              <select value={baseAplicada} onChange={(e) => trocarAdministradora(e.target.value)} className={classeSelect} data-campo="administradora">
+                {adms.map((a) => <option key={a.base} value={a.base}>{a.nome}</option>)}
+              </select>
+            </label>
+          )}
           <SeletorFundo
             fundos={fundos?.lista ?? []}
             carregando={carregandoFundos}
@@ -246,12 +327,12 @@ export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: S
 
         <Cartao
           numero="02"
-          titulo="Carteira Britech"
+          titulo="Carteira"
           icone={<Landmark className="size-5" />}
           pronto={!!wp && carteiraPronta}
           descricao={modoCarteira === "api"
-            ? <>Composição da carteira na data-base, direto da API da Britech (<code className="text-creme/80">delta</code>), achada pelo CNPJ.</>
-            : <>A carteira já baixada em <code className="text-creme/80">_Carteiras\FORMATADA\&lt;data&gt;</code>.</>}
+            ? <>Composição da carteira na data-base, direto da API da Britech da administradora, achada pelo CNPJ.</>
+            : <>Do Drive: a carteira Britech já baixada (<code className="text-creme/80">_Carteiras\FORMATADA</code>) ou, nas administradoras sem Britech, a amostra (<code className="text-creme/80">_Amostra</code>) ou o estoque (<code className="text-creme/80">_Insumos</code>) do fundo.</>}
         >
           <Alternador
             valor={modoCarteira}
@@ -259,20 +340,20 @@ export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: S
               onMudar();
               setModoCarteira(m);
             }}
-            opcoes={[{ valor: "api", rotulo: "API Britech" }, { valor: "formatada", rotulo: "Arquivo baixado" }]}
+            opcoes={[{ valor: "api", rotulo: "API Britech" }, { valor: "drive", rotulo: "Arquivo no Drive" }]}
           />
           {!wp ? (
             <p className="text-xs text-creme/45">Escolha o fundo primeiro.</p>
           ) : modoCarteira === "api" ? (
             !status.britech.configurada ? (
-              <p className="text-sm text-aviso">Credenciais da Britech não configuradas: crie o <code>.env.local</code> com BRITECH_USUARIO e BRITECH_SENHA e reinicie o app.</p>
+              <p className="text-sm text-aviso">{motivoSemBritech}</p>
             ) : !carteiras ? (
               <p className="inline-flex items-center gap-2 text-xs text-creme/60"><Loader2 className="size-3 animate-spin" /> Buscando as carteiras do CNPJ na Britech…</p>
             ) : (
               <div className="space-y-2">
                 {carteiras.lista.length > 0 ? (
                   <select value={idCarteira} onChange={(e) => { onMudar(); setIdCarteira(e.target.value); }} className={classeSelect}>
-                    {carteiras.lista.map((c) => <option key={c.id} value={c.id}>{c.id} — {c.nome}</option>)}
+                    {carteiras.lista.map((c) => <option key={c.id} value={c.id}>{c.id} — {c.nome}{c.admNome ? ` (${c.admNome})` : ""}</option>)}
                   </select>
                 ) : (
                   <input
@@ -283,15 +364,25 @@ export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: S
                   />
                 )}
                 {carteiras.erro && <p className="text-xs text-erro">{carteiras.erro}</p>}
-                {idCarteira && <p className="text-xs text-creme/55">Carteira {idCarteira}{nomeCarteira ? ` (${nomeCarteira})` : ""} em {fmtData(dataEf)} — baixada ao conferir.</p>}
+                {avisoBritech && <p className="text-xs text-aviso">{avisoBritech}</p>}
+                {idCarteira && <p className="text-xs text-creme/55">Carteira {idCarteira}{nomeCarteira ? ` (${nomeCarteira})` : ""}{opcaoCarteira?.admNome ? ` na Britech ${opcaoCarteira.admNome}` : ""} em {fmtData(dataEf)} — baixada ao conferir.</p>}
               </div>
             )
-          ) : formatada === undefined ? (
-            <p className="inline-flex items-center gap-2 text-xs text-creme/60"><Loader2 className="size-3 animate-spin" /> Procurando a carteira do fundo…</p>
-          ) : formatada ? (
-            <p className="break-all rounded-xl bg-creme/[0.04] px-3 py-2.5 text-xs text-creme/70">{formatada.arquivo}</p>
+          ) : procurandoNoDrive ? (
+            <p className="inline-flex items-center gap-2 text-xs text-creme/60"><Loader2 className="size-3 animate-spin" /> Procurando a carteira, a amostra e o estoque do fundo…</p>
+          ) : noDrive ? (
+            <div className="space-y-2">
+              <select value={noDrive.caminho} onChange={(e) => { onMudar(); setArquivoSel(e.target.value); }} className={classeSelect} data-campo="carteira-drive">
+                {opcoesDrive.map((o) => <option key={o.caminho} value={o.caminho}>{o.rotulo}</option>)}
+              </select>
+              {noDrive.tipo === "estoque" && (
+                <p className="text-xs text-creme/55">Estoque com muitos recebíveis: o app confere só os que estão na WP_Termo.</p>
+              )}
+            </div>
           ) : (
-            <p className="text-sm text-erro">Não há carteira deste CNPJ em {fmtData(dataEf)} em _Carteiras\FORMATADA.</p>
+            <p className="text-sm text-erro">
+              Não achei no Drive a carteira deste CNPJ em {fmtData(dataEf)} (_Carteiras\FORMATADA) nem a amostra/estoque do fundo (_Amostra, _Insumos).
+            </p>
           )}
         </Cartao>
 
@@ -327,6 +418,7 @@ export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: S
         </Cartao>
       </div>
 
+      {provedor.tipo !== "pasta" && (
       <details className="mt-4 rounded-2xl border border-border bg-card px-5 py-3 text-sm text-creme/70">
         <summary className="cursor-pointer text-creme/60">Pasta do trimestre no Drive</summary>
         <div className="mt-3 space-y-3 pb-2">
@@ -348,10 +440,11 @@ export function FontesAuto({ status, acoes, onMudar }: PropsFontes & { status: S
           </div>
           <p className="text-xs text-creme/45">
             Dentro dela o app procura <code>_Workpapers</code>, <code>Lastro e Termo</code> e <code>_Carteiras\FORMATADA</code>.
-            O padrão vem de LASTRO_DRIVE_BASE.
+            {" O padrão vem de LASTRO_DRIVE_BASE."}
           </p>
         </div>
       </details>
+      )}
 
       {acoes(preparo)}
     </>

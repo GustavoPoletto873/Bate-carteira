@@ -1,12 +1,14 @@
 /**
  * Trava das rotas /api: elas leem o Drive e usam as credenciais da Britech, então não podem ficar abertas.
- * - Com LASTRO_CHAVE_ACESSO configurada: a chave é sempre exigida (cabeçalho x-lastro-chave).
+ * - Na Vercel, quem vem da rede liberada (LASTRO_IPS_PERMITIDOS, ver rede.ts) passa sem chave.
+ * - Com LASTRO_CHAVE_ACESSO configurada: a chave é exigida (cabeçalho x-lastro-chave) de quem não está na rede liberada.
  * - Sem a chave: só funciona no próprio computador (fora da Vercel e com Host localhost). Os scripts
  *   `npm run dev`/`npm start` sobem o servidor só em 127.0.0.1, então ninguém da rede chega nele.
  * - Na Vercel sem a chave: rotas fechadas.
  */
 import { timingSafeEqual } from "node:crypto";
 import { CHAVE_ACESSO } from "./config";
+import { redeLiberada } from "./rede";
 
 const HOSTS_LOCAIS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
@@ -29,6 +31,7 @@ export function ehLocal(req: Request): boolean {
 /** null = pode seguir; Response = recusa pronta para devolver. */
 export function verificarAcesso(req: Request): Response | null {
   if (ehLocal(req)) return null;
+  if (redeLiberada(req.headers)) return null; // rede do escritório (LASTRO_IPS_PERMITIDOS): sem chave
   if (!CHAVE_ACESSO) {
     return Response.json(
       { erro: "Acesso fechado: configure LASTRO_CHAVE_ACESSO no servidor para usar o Drive e a Britech fora do seu computador." },

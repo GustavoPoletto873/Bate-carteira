@@ -1,12 +1,15 @@
 "use client";
 
-import { ArrowRight, KeyRound, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ArrowRight, FolderOpen, History, KeyRound, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { WordsPullUp } from "@/components/ui/prisma-hero";
+import { DRIVE_BASE_PADRAO } from "@/lib/lastro/drive-comum";
+import { conferirPastaBase, criarProvedorPasta } from "@/lib/lastro/drive-pasta";
+import { escolherPasta, lembrada, reabrir, suportaAcessoDireto, type HandlePasta } from "@/lib/lastro/fontes";
 import type { PdfJs } from "@/lib/lastro/extratores";
 import { gerarExcel, lerDocumentos, montarResultado, type ResultadoCompleto } from "@/lib/lastro/pipeline";
 import { lerCarteira } from "@/lib/lastro/planilhas";
-import { salvarChave, servidor, type StatusServidor } from "@/lib/lastro/servidor-cliente";
+import { provedorLocal, salvarChave, servidor, type StatusServidor } from "@/lib/lastro/servidor-cliente";
 import { cn } from "@/lib/utils";
 import { Alternador, classeSelect, mensagem } from "./comum";
 import { FontesAuto } from "./fontes-auto";
@@ -27,6 +30,20 @@ async function carregarPdfjs(): Promise<PdfJs> {
 
 type EstadoServidor = { carregando: true } | { carregando: false; status: StatusServidor | null; erro: string };
 
+/** De onde o modo automático lê o Drive. */
+type FonteDrive = "local" | "pasta";
+const ROTULO_FONTE: Record<FonteDrive, string> = {
+  local: "Servidor (G:)", pasta: "Pasta deste computador",
+};
+const MEMORIA_BASE = "lastro-pasta-trimestre";
+const semAssinatura = () => () => {};
+
+/** Sem resposta do servidor: nada de Drive local nem Britech. */
+const STATUS_VAZIO: StatusServidor = {
+  local: false, exigeChave: true, chaveConfigurada: false, liberado: false,
+  drive: { disponivel: false, base: "" }, britech: { configurada: false, url: "", administradoras: [] },
+};
+
 export function Conferencia() {
   const [servidorInfo, setServidorInfo] = useState<EstadoServidor>({ carregando: true });
   const [recarga, setRecarga] = useState(0);
@@ -37,26 +54,71 @@ export function Conferencia() {
   const [resultado, setResultado] = useState<ResultadoCompleto | null>(null);
   const [baixando, setBaixando] = useState(false);
 
+  const [escolhaDrive, setEscolhaDrive] = useState<FonteDrive | null>(null);
+  const suportePasta = useSyncExternalStore(semAssinatura, suportaAcessoDireto, () => false);
+  const [pastaBase, setPastaBase] = useState<HandlePasta | null>(null);
+  const [ultimaPasta, setUltimaPasta] = useState<string | null>(null);
+  const [erroPasta, setErroPasta] = useState("");
+  const [abrindoPasta, setAbrindoPasta] = useState(false);
+  const provedorPasta = useMemo(() => (pastaBase ? criarProvedorPasta(pastaBase) : null), [pastaBase]);
+
   useEffect(() => {
     let vivo = true;
     servidor.status()
       .then((status) => {
         if (!vivo) return;
         setServidorInfo({ carregando: false, status, erro: "" });
-        setModo(status.drive.disponivel ? "auto" : "manual");
+        setModo(status.drive.disponivel || suportaAcessoDireto() ? "auto" : "manual");
       })
       .catch((e) => {
         if (!vivo) return;
         setServidorInfo({ carregando: false, status: null, erro: mensagem(e) });
-        setModo("manual");
+        setModo(suportaAcessoDireto() ? "auto" : "manual");
       });
     return () => {
       vivo = false;
     };
   }, [recarga]);
 
+  useEffect(() => {
+    let vivo = true;
+    lembrada(MEMORIA_BASE).then((nome) => vivo && setUltimaPasta(nome));
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
   const status = servidorInfo.carregando ? null : servidorInfo.status;
-  const autoDisponivel = !!status?.drive.disponivel;
+  const localOk = !!status?.drive.disponivel;
+  const fontesDisponiveis: FonteDrive[] = [
+    ...(localOk ? (["local"] as const) : []),
+    ...(suportePasta ? (["pasta"] as const) : []),
+  ];
+  const fonteDrive: FonteDrive | null = escolhaDrive && fontesDisponiveis.includes(escolhaDrive)
+    ? escolhaDrive : fontesDisponiveis[0] ?? null;
+  const autoDisponivel = fontesDisponiveis.length > 0;
+
+  /** Escolhe (ou reabre) a pasta do trimestre no computador de quem usa. */
+  async function abrirPastaBase(reabrirUltima: boolean) {
+    setErroPasta("");
+    setAbrindoPasta(true);
+    try {
+      const fonte = reabrirUltima ? await reabrir(MEMORIA_BASE, false) : await escolherPasta(MEMORIA_BASE, false);
+      if (!fonte || fonte.tipo !== "pasta" || !fonte.handle) return;
+      const problema = await conferirPastaBase(fonte.handle);
+      if (problema) {
+        setErroPasta(problema);
+        return;
+      }
+      limpar();
+      setPastaBase(fonte.handle);
+      setUltimaPasta(fonte.handle.name);
+    } catch (e) {
+      setErroPasta(mensagem(e));
+    } finally {
+      setAbrindoPasta(false);
+    }
+  }
 
   function limpar() {
     setResultado(null);
@@ -66,7 +128,7 @@ export function Conferencia() {
   async function conferirAgora(p: Preparo) {
     limpar();
     try {
-      setProgresso({ atual: 0, total: 0, texto: "Buscando a carteira Britech" });
+      setProgresso({ atual: 0, total: 0, texto: "Buscando a carteira" });
       const carteira = await p.carteira.obter();
       const posicoes = lerCarteira(carteira.bytes, carteira.nome);
 
@@ -173,9 +235,10 @@ export function Conferencia() {
             />
             <p className="text-sm text-creme/60">
               {servidorInfo.carregando ? "Verificando o acesso ao Drive e à Britech…"
-                : modo === "auto" ? "Escolha o fundo: o workpaper e a pasta de lastro vêm do Drive (G:) e a carteira, da API da Britech."
+                : modo === "auto"
+                  ? `Escolha o fundo: o workpaper e a pasta de lastro vêm ${fonteDrive === "pasta" ? "da pasta do trimestre neste computador (G:)" : "do Drive (G:)"} e a carteira, da API da Britech.`
                   : autoDisponivel ? "Escolha o workpaper, a carteira e a pasta à mão (ou arraste para os cartões)."
-                    : "O Drive (G:) não está acessível por este servidor: escolha os arquivos à mão. No Chrome e no Edge o app lembra a última escolha."}
+                    : "O Drive não está acessível por aqui (sem G: neste servidor e este navegador não deixa escolher pastas — use Chrome ou Edge): escolha os arquivos à mão."}
             </p>
           </div>
         </div>
@@ -205,10 +268,77 @@ export function Conferencia() {
           </form>
         )}
 
+        {modo === "auto" && !servidorInfo.carregando && (fontesDisponiveis.length > 1 || fonteDrive !== "local") && (
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            {fontesDisponiveis.length > 1 ? (
+              <div className="flex flex-col gap-2 text-sm text-creme/60 sm:flex-row sm:items-center sm:gap-3">
+                <span className="shrink-0">Ler o Drive por</span>
+                <div className={cn("w-full", "sm:w-[24rem]")}>
+                  <Alternador
+                    valor={fonteDrive ?? fontesDisponiveis[0]}
+                    onMudar={(v) => {
+                      limpar();
+                      setEscolhaDrive(v);
+                    }}
+                    opcoes={fontesDisponiveis.map((f) => ({ valor: f, rotulo: ROTULO_FONTE[f] }))}
+                  />
+                </div>
+              </div>
+            ) : <span />}
+            {fonteDrive === "pasta" && pastaBase && (
+              <p className="text-sm text-creme/60">
+                Pasta: <span className="text-creme/85">{pastaBase.name}</span> ·{" "}
+                <button type="button" onClick={() => abrirPastaBase(false)} className="underline underline-offset-4 hover:text-creme">trocar</button>
+              </p>
+            )}
+          </div>
+        )}
+
         {servidorInfo.carregando ? (
           <p className="inline-flex items-center gap-2 text-sm text-creme/60"><Loader2 className="size-4 animate-spin" /> Carregando…</p>
-        ) : modo === "auto" && status ? (
-          <FontesAuto key={`auto-${recarga}`} status={status} acoes={barra} onMudar={limpar} />
+        ) : modo === "auto" && fonteDrive === "pasta" && !pastaBase ? (
+          <div className="flex flex-col items-start gap-4 rounded-2xl border border-border bg-card p-6 md:flex-row md:items-center md:justify-between">
+            <div className="max-w-2xl space-y-1">
+              <p className="text-lg font-medium text-creme">Escolha a pasta do trimestre neste computador</p>
+              <p className="text-sm text-creme/60">
+                No seletor, vá até o <b className="font-medium text-creme/80">G:</b> e escolha a pasta do trimestre (ex.:{" "}
+                <code className="text-creme/80">…\2026\2T2026</code>), que tem uma pasta por administradora — ou só a de uma
+                administradora (<code className="text-creme/80">…\2T2026\PLANNER</code>). O navegador só lê essa pasta e nada sai do
+                seu computador; só a carteira vem da Britech.
+              </p>
+              {erroPasta && <p className="text-sm text-erro">{erroPasta}</p>}
+            </div>
+            <div className="flex shrink-0 flex-col items-stretch gap-2">
+              <button
+                type="button"
+                onClick={() => abrirPastaBase(false)}
+                disabled={abrindoPasta}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-black disabled:opacity-50"
+              >
+                {abrindoPasta ? <Loader2 className="size-4 animate-spin" /> : <FolderOpen className="size-4" />}
+                Escolher pasta
+              </button>
+              {ultimaPasta && (
+                <button
+                  type="button"
+                  onClick={() => abrirPastaBase(true)}
+                  disabled={abrindoPasta}
+                  className="inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm text-creme/80 ring-1 ring-creme/20 hover:bg-creme/[0.06] disabled:opacity-50"
+                >
+                  <History className="size-4" /> Usar a última: {ultimaPasta}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : modo === "auto" && fonteDrive ? (
+          <FontesAuto
+            key={`auto-${fonteDrive}-${recarga}-${pastaBase?.name ?? ""}`}
+            status={status ?? STATUS_VAZIO}
+            provedor={fonteDrive === "pasta" && provedorPasta ? provedorPasta : provedorLocal}
+            basePadrao={fonteDrive === "pasta" ? pastaBase?.name ?? "" : status?.drive.base || DRIVE_BASE_PADRAO}
+            acoes={barra}
+            onMudar={limpar}
+          />
         ) : (
           <FontesManuais key={`manual-${recarga}`} status={status} acoes={barra} onMudar={limpar} />
         )}
