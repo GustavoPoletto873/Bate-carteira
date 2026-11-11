@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/static/css/app_theme.css" />
+  <script src="/static/js/theme-sync.js"></script>
+  <title>Bate Carteira Britech x Lastro — SimplificaHub</title>
+  <style>
+    .main { padding: 24px 24px 48px; max-width: 1320px; margin: 0 auto; }
+    .page-header { margin-bottom: 24px; }
+    .page-header h1 { color: var(--white); font-size: 1.7rem; font-weight: 700; margin-bottom: 4px; }
+    .page-header p { color: color-mix(in srgb, var(--white) 55%, transparent); font-size: 0.9rem; max-width: 900px; }
+    .card { margin-bottom: 20px; }
+    .card h2 { color: var(--white); font-size: 1.05rem; font-weight: 600; margin-bottom: 14px; }
+
+    .linha-campo { display: flex; gap: 10px; align-items: stretch; }
+    .linha-campo > input { flex: 1; min-width: 0; }
+    .linha-campo > button { flex: 0 0 auto; width: auto; padding-left: 18px; padding-right: 18px; }
+    .info-fundo { margin-top: 6px; font-size: 0.85rem; color: color-mix(in srgb, var(--white) 75%, transparent); }
+    .info-fundo strong { color: var(--primary); }
+    .grade-2 { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: start; }
+    .bloco-origem { margin-top: 10px; padding: 14px; border-radius: 10px;
+      background: color-mix(in srgb, var(--white) 4%, transparent);
+      border: 1px solid color-mix(in srgb, var(--white) 8%, transparent); }
+    .oculto { display: none !important; }
+    details.avancado summary { cursor: pointer; color: color-mix(in srgb, var(--white) 60%, transparent);
+      font-size: 0.85rem; margin: 6px 0 10px; }
+
+    .barra { height: 6px; border-radius: 4px; overflow: hidden; margin-top: 10px;
+      background: color-mix(in srgb, var(--white) 10%, transparent); }
+    .barra > div { height: 100%; width: 0; background: var(--primary); transition: width 0.4s; }
+
+    .placar { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .placar .tile { padding: 12px 14px; border-radius: 10px; cursor: pointer; text-align: left;
+      border: 1px solid color-mix(in srgb, var(--white) 10%, transparent);
+      background: color-mix(in srgb, var(--white) 4%, transparent); color: var(--white); font: inherit; }
+    .placar .tile.ativo { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }
+    .placar .num { font-size: 1.6rem; font-weight: 700; display: block; }
+    .placar .rot { font-size: 0.8rem; color: color-mix(in srgb, var(--white) 65%, transparent); }
+    .placar .t-ok .num { color: var(--success); }
+    .placar .t-erro .num { color: var(--danger); }
+    .placar .t-aviso .num { color: var(--warning); }
+    .meta-resultado { font-size: 0.85rem; color: color-mix(in srgb, var(--white) 65%, transparent); margin-bottom: 14px; }
+    .meta-resultado div { margin-bottom: 2px; overflow-wrap: anywhere; }
+    .avisos { margin-bottom: 12px; color: var(--warning); font-size: 0.85rem; }
+
+    .tabela-wrap { overflow-x: auto; }
+    table.conf { width: 100%; border-collapse: collapse; font-size: 0.84rem; color: var(--white); }
+    table.conf th { text-align: left; font-weight: 600; padding: 9px 10px; white-space: nowrap;
+      color: color-mix(in srgb, var(--white) 70%, transparent);
+      border-bottom: 1px solid color-mix(in srgb, var(--white) 18%, transparent); }
+    table.conf td { padding: 9px 10px; vertical-align: top;
+      border-bottom: 1px solid color-mix(in srgb, var(--white) 7%, transparent); }
+    table.conf tr.linha { cursor: pointer; }
+    table.conf tr.linha:hover td { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+    table.conf tr.detalhe td { background: color-mix(in srgb, var(--white) 3%, transparent); }
+    .ativo-nome { font-weight: 600; }
+    .sub { display: block; font-size: 0.78rem; color: color-mix(in srgb, var(--white) 55%, transparent); margin-top: 2px; }
+    .valor-britech { white-space: nowrap; }
+    .doc-valor { display: block; font-size: 0.76rem; margin-top: 3px; color: color-mix(in srgb, var(--white) 70%, transparent); }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 600;
+      white-space: nowrap; margin-top: 4px; }
+    .b-ok { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
+    .b-erro { color: var(--danger); background: color-mix(in srgb, var(--danger) 15%, transparent); }
+    .b-aviso { color: var(--warning); background: color-mix(in srgb, var(--warning) 15%, transparent); }
+    .b-neutro { color: color-mix(in srgb, var(--white) 65%, transparent); background: color-mix(in srgb, var(--white) 8%, transparent); }
+
+    .evid { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 6px; }
+    .evid th, .evid td { padding: 6px 8px; text-align: left; vertical-align: top;
+      border-bottom: 1px solid color-mix(in srgb, var(--white) 6%, transparent); }
+    .evid th { color: color-mix(in srgb, var(--white) 60%, transparent); font-weight: 600; }
+    .evid td.trecho { color: color-mix(in srgb, var(--white) 75%, transparent); min-width: 320px; }
+    .notas { margin: 4px 0 8px; padding-left: 18px; font-size: 0.82rem; color: var(--warning); }
+    .vazio { padding: 18px; text-align: center; color: color-mix(in srgb, var(--white) 55%, transparent); }
+    .acoes-resultado { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+    .acoes-resultado > a { width: auto; padding-left: 20px; padding-right: 20px; }
+    .filtro-wp { font-size: 0.85rem; color: color-mix(in srgb, var(--white) 70%, transparent);
+      display: flex; gap: 6px; align-items: center; }
+    .filtro-wp input { accent-color: var(--primary); }
+
+    @media (max-width: 800px) { .grade-2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="main">
+
+  <div class="page-header">
+    <h1>Bate Carteira Britech x Lastro</h1>
+    <p>Confere, para cada título da carteira Britech, o <strong>VL Aplic.</strong>, as <strong>datas de emissão e vencimento</strong>
+      e o <strong>emissor</strong> contra a aba WP_Termo do workpaper e contra os documentos da pasta de lastro e termo do fundo.</p>
+  </div>
+
+  <div class="card">
+    <h2>Fontes</h2>
+    <form id="form" enctype="multipart/form-data" autocomplete="off">
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="workpaper">Workpaper do fundo (.xlsm) — aba WP_Termo</label>
+        <div class="linha-campo">
+          <input class="form-control" id="workpaper" name="workpaper" type="text" value="{{ workpaper_padrao }}"
+                 placeholder="G:\Drives compartilhados\...\_Workpapers\WPS\WP_<fundo>_<cnpj>.xlsm">
+          <button type="button" class="btn-secundario" id="btn-ler">Ler workpaper</button>
+        </div>
+        <div class="info-fundo" id="info-fundo"></div>
+      </div>
+
+      <div class="form-group">
+        <label for="pasta_lastro">Pasta de lastro e termo do fundo</label>
+        <input class="form-control" id="pasta_lastro" name="pasta_lastro" type="text" value="{{ pasta_lastro_padrao }}"
+               placeholder="G:\Drives compartilhados\...\Lastro e Termo\<fundo>">
+        <span class="form-hint">Lê PDF, HTML das boletas, DOCX e TXT (inclusive em subpastas). PDFs longos: até {{ max_paginas }} páginas. Sem OCR.</span>
+      </div>
+
+      <div class="grade-2">
+        <div class="form-group">
+          <label for="data_base">Data-base</label>
+          <input class="form-control" id="data_base" name="data_base" type="date">
+          <span class="form-hint">Vem do workpaper; pode trocar.</span>
+        </div>
+        <div class="form-group">
+          <label>Carteira Britech</label>
+          <div class="radio-group">
+            <label class="radio-label"><input type="radio" name="origem" value="arquivo" checked> Arquivo da carteira</label>
+            <label class="radio-label"><input type="radio" name="origem" value="api"> Buscar direto na Britech (API)</label>
+          </div>
+
+          <div class="bloco-origem" id="bloco-arquivo">
+            <div class="form-group">
+              <label for="arquivo_britech">Arquivo da carteira (_BRITECH.xlsx ou exportação do PAS)</label>
+              <input class="form-control" id="arquivo_britech" name="arquivo_britech" type="text"
+                     placeholder="Em branco: procura <ID>_<CNPJ>_<data>_BRITECH.xlsx na pasta das carteiras">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label for="arquivo_carteira">…ou envie o Excel exportado do PAS (substitui o caminho acima)</label>
+              <input class="form-control" id="arquivo_carteira" name="arquivo_carteira" type="file" accept=".xlsx,.xls,.xlsm,.csv">
+            </div>
+          </div>
+
+          <div class="bloco-origem oculto" id="bloco-api">
+            <div class="form-group" style="margin-bottom:0">
+              <label for="id_carteira">ID da carteira na Britech (delta)</label>
+              <input class="form-control" id="id_carteira" name="id_carteira" type="text" inputmode="numeric" placeholder="ex.: 52230">
+              <span class="form-hint">
+                {% if api_configurada %}Usa as credenciais da Britech Planner já cadastradas no hub. Em branco: o app tenta achar o ID pelo CNPJ.
+                {% else %}Atenção: as credenciais da Britech Planner não estão configuradas neste servidor — use a opção “Arquivo da carteira”.{% endif %}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <details class="avancado">
+        <summary>Opções avançadas</summary>
+        <div class="form-group">
+          <label for="pasta_carteiras">Pasta das carteiras Britech já baixadas (uma subpasta por data, dd.mm.aaaa)</label>
+          <input class="form-control" id="pasta_carteiras" name="pasta_carteiras" type="text" value="{{ pasta_carteiras_padrao }}">
+          <span class="form-hint">Tolerância de valor: R$ {{ tolerancia }}.</span>
+        </div>
+      </details>
+
+      <div class="btn-row">
+        <button id="btn-comparar" type="submit" class="btn-primary">
+          <div class="spinner" id="spinner"></div>
+          Comparar
+        </button>
+      </div>
+    </form>
+
+    <div class="feedback" id="feedback"></div>
+    <div class="barra oculto" id="barra"><div id="barra-progresso"></div></div>
+  </div>
+
+  <div class="card oculto" id="card-resultado">
+    <h2>Resultado</h2>
+    <div class="meta-resultado" id="meta-resultado"></div>
+    <div class="avisos" id="avisos"></div>
+    <div class="placar" id="placar"></div>
+    <div class="acoes-resultado">
+      <a class="btn-secundario" id="btn-baixar" href="#">Baixar Excel com as evidências</a>
+      <label class="filtro-wp"><input type="checkbox" id="so-wp"> Só os itens da WP_Termo (amostra)</label>
+    </div>
+    <div class="tabela-wrap">
+      <table class="conf">
+        <thead>
+          <tr>
+            <th>Situação</th><th>Ativo / Emissor</th><th>VL Aplic.</th><th>Dt. Emissão</th>
+            <th>Dt. Vencimento</th><th>Emissor nos docs</th><th>WP_Termo</th>
+          </tr>
+        </thead>
+        <tbody id="corpo"></tbody>
+      </table>
+    </div>
+    <p class="form-hint" style="margin-top:10px">Clique numa linha para ver os documentos e o trecho onde cada informação foi encontrada.</p>
+  </div>
+
+  <div class="card oculto" id="card-docs">
+    <details>
+      <summary style="cursor:pointer"><strong id="titulo-docs">Documentos lidos</strong></summary>
+      <div class="tabela-wrap" style="margin-top:12px">
+        <table class="conf">
+          <thead><tr><th>Arquivo</th><th>Tipo</th><th>Páginas</th><th>Cita CNPJ do fundo</th><th>Ligado a</th><th>Observação</th></tr></thead>
+          <tbody id="corpo-docs"></tbody>
+        </table>
+      </div>
+    </details>
+  </div>
+
+</div>
+
+<script>
+const BASE = window.location.pathname.replace(/\/?$/, '/');
+const CSRF = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+const $ = id => document.getElementById(id);
+const CAMPOS_SALVOS = ['workpaper', 'pasta_lastro', 'pasta_carteiras'];
+const CLASSE = { 'Confere': 'b-ok', 'OK': 'b-ok', 'Diverge': 'b-erro', 'Divergente': 'b-erro', 'Só no WP': 'b-erro',
+                 'Verificar': 'b-aviso', 'Não localizado': 'b-neutro', 'Sem documentos': 'b-neutro', '—': 'b-neutro' };
+const ORDEM_SITUACAO = ['Divergente', 'Só no WP', 'Verificar', 'OK', 'Sem documentos'];
+let resultadoAtual = null, filtroSituacao = '', ultimoWpLido = '', arquivoSugerido = '';
+
+function el(tag, props = {}, ...filhos) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v; else if (k === 'text') e.textContent = v; else e.setAttribute(k, v);
+  }
+  for (const f of filhos) if (f !== null && f !== undefined) e.append(f);
+  return e;
+}
+const badge = (status, titulo) => el('span', { class: 'badge ' + (CLASSE[status] || 'b-neutro'), text: status, title: titulo || '' });
+
+function mostrar(tipo, mensagem) {
+  $('feedback').textContent = mensagem;
+  $('feedback').className = `feedback ${tipo} show`;
+}
+function progresso(atual, total) {
+  $('barra').classList.toggle('oculto', !total);
+  $('barra-progresso').style.width = total ? `${Math.round(100 * atual / total)}%` : '0';
+}
+
+// -------------------------------------------------- caminhos lembrados (só neste navegador)
+function lerSalvo(nome) { try { return localStorage.getItem('bate_carteira_lastro_' + nome); } catch (e) { return null; } }
+function salvar() {
+  for (const nome of CAMPOS_SALVOS) {
+    try { localStorage.setItem('bate_carteira_lastro_' + nome, $(nome).value.trim()); } catch (e) { /* sem storage */ }
+  }
+}
+for (const nome of CAMPOS_SALVOS) { const v = lerSalvo(nome); if (v) $(nome).value = v; }
+
+// -------------------------------------------------- origem da carteira
+function trocarOrigem() {
+  const api = document.querySelector('input[name="origem"]:checked').value === 'api';
+  $('bloco-api').classList.toggle('oculto', !api);
+  $('bloco-arquivo').classList.toggle('oculto', api);
+}
+document.querySelectorAll('input[name="origem"]').forEach(r => r.addEventListener('change', trocarOrigem));
+
+// -------------------------------------------------- ler workpaper (preenche data-base e carteira)
+async function lerWorkpaper() {
+  const caminho = $('workpaper').value.trim();
+  if (!caminho) return;
+  ultimoWpLido = caminho;
+  $('info-fundo').textContent = 'Lendo o workpaper…';
+  try {
+    const resp = await fetch(BASE + 'inspecionar/', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ workpaper: caminho, pasta_carteiras: $('pasta_carteiras').value.trim() }),
+    });
+    const d = await resp.json();
+    if (!resp.ok) { $('info-fundo').textContent = d.erro || 'Não consegui ler o workpaper.'; return; }
+    $('info-fundo').replaceChildren(
+      el('strong', { text: d.fundo || d.arquivo }), ` · CNPJ ${d.cnpj || '?'} · data-base ${d.data_base_fmt || '?'} · `,
+      `${d.linhas_wp_termo} linha(s) na WP_Termo`,
+      d.arquivo_britech_sugerido ? ' · carteira Britech encontrada' : ' · carteira Britech não encontrada na pasta');
+    if (d.data_base) $('data_base').value = d.data_base;
+    if (!$('arquivo_britech').value.trim() || $('arquivo_britech').value.trim() === arquivoSugerido) {
+      $('arquivo_britech').value = d.arquivo_britech_sugerido || '';
+      arquivoSugerido = d.arquivo_britech_sugerido || '';
+    }
+    if (d.id_carteira && !$('id_carteira').value.trim()) $('id_carteira').value = d.id_carteira;
+  } catch (err) {
+    $('info-fundo').textContent = `Erro de rede: ${err.message}`;
+  }
+}
+$('btn-ler').addEventListener('click', lerWorkpaper);
+$('workpaper').addEventListener('change', () => { if ($('workpaper').value.trim() !== ultimoWpLido) lerWorkpaper(); });
+if ($('workpaper').value.trim()) lerWorkpaper();
+
+// -------------------------------------------------- conferência
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  salvar();
+  $('btn-comparar').disabled = true;
+  $('spinner').classList.add('show');
+  mostrar('info', 'Iniciando a conferência…');
+  try {
+    const resp = await fetch(BASE + 'processar/', { method: 'POST', headers: { 'X-CSRFToken': CSRF }, body: new FormData($('form')) });
+    const d = await resp.json();
+    if (!resp.ok) { mostrar('error', d.erro || `Erro ${resp.status}.`); return; }
+    await acompanhar(d.job_id);
+  } catch (err) {
+    mostrar('error', `Erro de rede: ${err.message}`);
+  } finally {
+    $('btn-comparar').disabled = false;
+    $('spinner').classList.remove('show');
+  }
+});
+
+async function acompanhar(jobId) {
+  while (true) {
+    await new Promise(r => setTimeout(r, 1500));
+    const resp = await fetch(BASE + 'progresso/?job=' + encodeURIComponent(jobId));
+    const job = await resp.json();
+    if (!resp.ok) { mostrar('error', job.erro); progresso(0, 0); return; }
+    const conta = job.total ? ` (${job.atual}/${job.total})` : '';
+    mostrar('info', `${job.texto || 'Processando'}${conta}`);
+    progresso(job.atual, job.total);
+    if (job.done) {
+      progresso(0, 0);
+      if (job.erro) { mostrar('error', job.erro); return; }
+      $('btn-baixar').href = BASE + 'baixar/?r=' + encodeURIComponent(job.resultado_id);
+      renderizar(job.resultado);
+      mostrar('success', 'Conferência concluída.');
+      return;
+    }
+  }
+}
+
+// -------------------------------------------------- resultado
+function renderizar(r) {
+  resultadoAtual = r;
+  filtroSituacao = '';
+  const s = r.resumo;
+  $('meta-resultado').replaceChildren(
+    el('div', { text: `${s.fundo} · CNPJ ${s.cnpj} · data-base ${s.data_base} · gerado em ${s.gerado_em}` }),
+    el('div', { text: `Carteira: ${s.fonte_britech}` }),
+    el('div', { text: `${s.posicoes_britech} título(s) na Britech · ${s.linhas_wp_termo} linha(s) na WP_Termo · ` +
+      `${s.documentos_lidos} documento(s) lido(s), ${s.documentos_sem_texto} sem texto, ${s.arquivos_ignorados} não lido(s)` }));
+  $('avisos').replaceChildren(...(r.avisos || []).map(a => el('div', { text: '⚠ ' + a })));
+  desenharPlacar();
+  desenharTabela();
+  desenharDocumentos();
+  $('card-resultado').classList.remove('oculto');
+  $('card-docs').classList.remove('oculto');
+  $('card-resultado').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function desenharPlacar() {
+  const contagem = resultadoAtual.resumo.contagem || {};
+  const tiles = [el('button', { type: 'button', class: 'tile' + (filtroSituacao ? '' : ' ativo') },
+    el('span', { class: 'num', text: String(resultadoAtual.linhas.length) }), el('span', { class: 'rot', text: 'Todos' }))];
+  tiles[0].addEventListener('click', () => { filtroSituacao = ''; desenharPlacar(); desenharTabela(); });
+  for (const sit of ORDEM_SITUACAO) {
+    if (!contagem[sit]) continue;
+    const tom = { 'OK': 't-ok', 'Divergente': 't-erro', 'Só no WP': 't-erro', 'Verificar': 't-aviso' }[sit] || '';
+    const t = el('button', { type: 'button', class: `tile ${tom}` + (filtroSituacao === sit ? ' ativo' : '') },
+      el('span', { class: 'num', text: String(contagem[sit]) }), el('span', { class: 'rot', text: sit }));
+    t.addEventListener('click', () => { filtroSituacao = sit; desenharPlacar(); desenharTabela(); });
+    tiles.push(t);
+  }
+  $('placar').replaceChildren(...tiles);
+}
+$('so-wp').addEventListener('change', () => resultadoAtual && desenharTabela());
+
+function celulaCampo(c, ehData) {
+  const td = el('td', {}, el('span', { class: 'valor-britech', text: c.britech || '—' }));
+  td.append(el('br'), badge(c.status, c.nota));
+  if (c.documentos && c.documentos !== c.britech) td.append(el('span', { class: 'doc-valor', text: 'docs: ' + c.documentos }));
+  return td;
+}
+
+function celulaWp(linha) {
+  if (!linha.no_wp) return el('td', {}, el('span', { class: 'sub', text: 'fora da WP_Termo' }));
+  const c = linha.campos;
+  const status = ['valor', 'emissao', 'vencimento'].map(k => c[k].wp_status);
+  const geral = status.includes('Diverge') ? 'Diverge' : (status.every(x => x === 'Confere') ? 'Confere' : 'Verificar');
+  const difs = ['valor', 'emissao', 'vencimento'].filter(k => c[k].wp_status !== 'Confere')
+    .map(k => ({ valor: 'VL', emissao: 'emissão', vencimento: 'vencimento' }[k]) + ' ' + (c[k].wp || '—'));
+  const td = el('td', {}, el('span', { text: `linha ${linha.wp_linha}` }), el('br'), badge(geral));
+  if (difs.length) td.append(el('span', { class: 'doc-valor', text: 'WP: ' + difs.join(' · ') }));
+  return td;
+}
+
+function desenharTabela() {
+  const soWp = $('so-wp').checked;
+  const linhas = resultadoAtual.linhas.filter(l => (!filtroSituacao || l.situacao === filtroSituacao) && (!soWp || l.no_wp));
+  const corpo = $('corpo');
+  corpo.replaceChildren();
+  if (!linhas.length) { corpo.append(el('tr', {}, el('td', { colspan: '7', class: 'vazio', text: 'Nenhum item neste filtro.' }))); return; }
+  for (const l of linhas) {
+    const c = l.campos;
+    const tr = el('tr', { class: 'linha' },
+      el('td', {}, badge(l.situacao)),
+      el('td', {}, el('span', { class: 'ativo-nome', text: l.ativo || '—' }),
+        el('span', { class: 'sub', text: [l.emissor, l.codigo ? 'cód. ' + l.codigo : '', l.data_aquisicao ? 'aquisição ' + l.data_aquisicao : '']
+          .filter(Boolean).join(' · ') })),
+      celulaCampo(c.valor), celulaCampo(c.emissao), celulaCampo(c.vencimento),
+      el('td', {}, badge(c.emissor.status, c.emissor.nota),
+        c.emissor.documentos && c.emissor.status !== 'Confere' ? el('span', { class: 'doc-valor', text: c.emissor.documentos }) : null),
+      celulaWp(l));
+    const detalhe = el('tr', { class: 'detalhe oculto' }, el('td', { colspan: '7' }, montarDetalhe(l)));
+    tr.addEventListener('click', () => detalhe.classList.toggle('oculto'));
+    corpo.append(tr, detalhe);
+  }
+}
+
+function montarDetalhe(l) {
+  const rotulos = { valor: 'VL Aplic.', emissao: 'Dt. Emissão', vencimento: 'Dt. Vencimento', emissor: 'Emissor' };
+  const frag = document.createDocumentFragment();
+  const notas = Object.entries(l.campos).filter(([, c]) => c.nota).map(([k, c]) => el('li', { text: `${rotulos[k]}: ${c.nota}` }));
+  if (notas.length) frag.append(el('ul', { class: 'notas' }, ...notas));
+  if (!l.evidencias.length) {
+    frag.append(el('div', { class: 'vazio', text: 'Nenhum documento da pasta foi ligado a esta posição.' }));
+    return frag;
+  }
+  const corpo = el('tbody');
+  for (const e of l.evidencias) {
+    corpo.append(el('tr', {},
+      el('td', { text: rotulos[e.campo] || e.campo }), el('td', { text: e.valor }),
+      el('td', {}, badge(e.confere ? 'Confere' : 'Diverge')), el('td', { text: e.documento }),
+      el('td', { text: e.nivel }), el('td', { class: 'trecho', text: e.trecho || '' })));
+  }
+  frag.append(el('table', { class: 'evid' },
+    el('thead', {}, el('tr', {}, ...['Campo', 'No documento', 'x Britech', 'Documento', 'Ligação', 'Trecho'].map(t => el('th', { text: t })))),
+    corpo));
+  return frag;
+}
+
+function desenharDocumentos() {
+  const docs = resultadoAtual.documentos, ign = resultadoAtual.ignorados || [];
+  $('titulo-docs').textContent = `Documentos lidos (${docs.length}) e não lidos (${ign.length})`;
+  const linhas = docs.map(d => el('tr', {},
+    el('td', { text: d.nome }), el('td', { text: d.tipo }), el('td', { text: d.paginas }),
+    el('td', { text: d.cita_cnpj_fundo ? 'Sim' : 'Não' }), el('td', { text: d.vinculos.join(' · ') || '—' }),
+    el('td', { text: d.observacao || '' })));
+  for (const i of ign) linhas.push(el('tr', {}, el('td', { text: i.nome }), el('td', { text: '—' }), el('td', { text: '—' }),
+    el('td', { text: '—' }), el('td', { text: '—' }), el('td', { text: i.motivo })));
+  $('corpo-docs').replaceChildren(...linhas);
+}
+</script>
+</body>
+</html>

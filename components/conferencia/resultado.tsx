@@ -1,0 +1,263 @@
+"use client";
+
+import { ChevronDown, Download, FileText } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+import { CAMPOS, type Campo, type LinhaResultado, type Situacao } from "@/lib/lastro/conciliacao";
+import type { ResultadoCompleto } from "@/lib/lastro/pipeline";
+import { cn } from "@/lib/utils";
+import { corDoStatus, Status } from "./status";
+
+const ORDEM: Situacao[] = ["Divergente", "Só no WP", "Verificar", "OK", "Sem documentos"];
+const ROTULOS = Object.fromEntries(CAMPOS) as Record<string, string>;
+
+function CelulaCampo({ c }: { c: Campo }) {
+  return (
+    <td className="px-3 py-3 align-top">
+      <div className="whitespace-nowrap tabular-nums text-creme">{c.britech || "—"}</div>
+      <Status status={c.status} titulo={c.nota} className="mt-1.5" />
+      {c.documentos && c.documentos !== c.britech && (
+        <div className="mt-1 max-w-[14rem] text-xs leading-snug text-creme/55">docs: {c.documentos}</div>
+      )}
+    </td>
+  );
+}
+
+function CelulaWp({ l }: { l: LinhaResultado }) {
+  if (!l.noWp) return <td className="px-3 py-3 align-top text-xs text-creme/40">fora da WP_Termo</td>;
+  const chaves = ["valor", "emissao", "vencimento"] as const;
+  const status = chaves.map((k) => l.campos[k].wpStatus);
+  const geral = status.includes("Diverge") ? "Diverge" : status.every((s) => s === "Confere") ? "Confere" : "Verificar";
+  const difs = chaves.filter((k) => l.campos[k].wpStatus !== "Confere")
+    .map((k) => `${{ valor: "VL", emissao: "emissão", vencimento: "venc." }[k]} ${l.campos[k].wp || "—"}`);
+  return (
+    <td className="px-3 py-3 align-top">
+      <div className="whitespace-nowrap text-creme/80">linha {l.wpLinha}</div>
+      <Status status={geral} className="mt-1.5" />
+      {difs.length > 0 && <div className="mt-1 text-xs text-creme/55">WP: {difs.join(" · ")}</div>}
+    </td>
+  );
+}
+
+function Detalhe({ l }: { l: LinhaResultado }) {
+  const notas = CAMPOS.filter(([k]) => l.campos[k].nota).map(([k, rot]) => `${rot}: ${l.campos[k].nota}`);
+  return (
+    <div className="space-y-3 px-3 pb-5 pt-1">
+      {notas.length > 0 && (
+        <ul className="space-y-1 text-sm text-aviso/90">
+          {notas.map((n) => <li key={n}>• {n}</li>)}
+        </ul>
+      )}
+      {l.evidencias.length === 0 ? (
+        <p className="text-sm text-creme/50">Nenhum documento da pasta foi ligado a este título.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl ring-1 ring-creme/10">
+          <table className="w-full text-xs">
+            <thead className="bg-creme/[0.04] text-left text-creme/50">
+              <tr>
+                {["Campo", "No documento", "x Britech", "Documento", "Ligação", "Trecho"].map((t) => (
+                  <th key={t} className="px-3 py-2 font-medium">{t}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {l.evidencias.map((e, i) => (
+                <tr key={i} className="border-t border-creme/[0.06] align-top">
+                  <td className="whitespace-nowrap px-3 py-2 text-creme/70">{ROTULOS[e.campo]}</td>
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums text-creme">{e.valor}</td>
+                  <td className="px-3 py-2"><Status status={e.confere ? "Confere" : "Diverge"} /></td>
+                  <td className="max-w-[16rem] break-words px-3 py-2 text-creme/80">{e.documento}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-creme/55">{e.nivel}</td>
+                  <td className="min-w-[22rem] px-3 py-2 leading-relaxed text-creme/60">{e.trecho}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Resultado({ resultado, onBaixar, baixando }: {
+  resultado: ResultadoCompleto; onBaixar: () => void; baixando: boolean;
+}) {
+  const [filtro, setFiltro] = useState<Situacao | "">("");
+  const [soWp, setSoWp] = useState(false);
+  const [abertas, setAbertas] = useState<Set<number>>(new Set());
+  const r = resultado;
+  const s = r.resumo;
+
+  const linhas = useMemo(
+    () => r.linhas.filter((l) => (!filtro || l.situacao === filtro) && (!soWp || l.noWp)),
+    [r.linhas, filtro, soWp],
+  );
+  const alternar = (id: number) =>
+    setAbertas((atual) => {
+      const nova = new Set(atual);
+      if (nova.has(id)) nova.delete(id);
+      else nova.add(id);
+      return nova;
+    });
+
+  const tiles: { chave: Situacao | ""; rotulo: string; n: number }[] = [
+    { chave: "", rotulo: "Todos", n: r.linhas.length },
+    ...ORDEM.filter((k) => s.contagem[k]).map((k) => ({ chave: k, rotulo: k, n: s.contagem[k] ?? 0 })),
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-1 text-sm text-creme/60">
+        <p className="text-creme/85">
+          {s.fundo} · CNPJ {s.cnpj} · data-base {s.dataBase} · gerado em {s.geradoEm}
+        </p>
+        <p className="break-all">Carteira Britech: {s.fonteBritech}</p>
+        <p>
+          {s.posicoesBritech} título(s) na Britech · {s.linhasWpTermo} linha(s) na WP_Termo · {s.documentosLidos} documento(s)
+          lido(s), {s.documentosSemTexto} sem texto, {s.arquivosIgnorados} não lido(s)
+        </p>
+        {r.avisos.map((a) => <p key={a} className="text-aviso">⚠ {a}</p>)}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {tiles.map((t) => {
+          const ativo = filtro === t.chave;
+          return (
+            <button
+              key={t.rotulo}
+              type="button"
+              onClick={() => setFiltro(t.chave)}
+              className={cn(
+                "rounded-2xl border px-4 py-3 text-left transition-colors",
+                ativo ? "border-creme/50 bg-creme/[0.07]" : "border-border bg-card hover:border-creme/25",
+              )}
+            >
+              <span className={cn("block text-3xl font-medium tracking-tight tabular-nums",
+                t.chave ? corDoStatus(t.chave).split(" ")[0] : "text-creme")}>{t.n}</span>
+              <span className="text-xs text-creme/60">{t.rotulo}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4">
+        <button
+          type="button"
+          onClick={onBaixar}
+          disabled={baixando}
+          className="group inline-flex items-center gap-2 rounded-full bg-primary py-1 pl-5 pr-1 text-sm font-medium text-black transition-all hover:gap-3 disabled:opacity-60"
+        >
+          {baixando ? "Gerando Excel…" : "Baixar Excel com as evidências"}
+          <span className="flex size-9 items-center justify-center rounded-full bg-black">
+            <Download className="size-4 text-creme" />
+          </span>
+        </button>
+        <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-creme/70">
+          <input type="checkbox" checked={soWp} onChange={(e) => setSoWp(e.target.checked)} className="size-4 accent-[#e1e0cc]" />
+          Só os itens da WP_Termo (amostra)
+        </label>
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+        <table className="w-full min-w-[960px] text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-xs text-creme/50">
+              {["", "Situação", "Ativo / Emissor", "VL Aplic.", "Dt. Emissão", "Dt. Vencimento", "Emissor nos docs", "WP_Termo"].map((t, i) => (
+                <th key={i} className="px-3 py-3 font-medium">{t}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.length === 0 && (
+              <tr><td colSpan={8} className="px-3 py-10 text-center text-creme/50">Nenhum item neste filtro.</td></tr>
+            )}
+            {linhas.map((l) => {
+              const aberta = abertas.has(l.id);
+              return (
+                <Fragment key={l.id}>
+                  <tr
+                    onClick={() => alternar(l.id)}
+                    className={cn("cursor-pointer border-t border-creme/[0.06] transition-colors hover:bg-creme/[0.03]", aberta && "bg-creme/[0.03]")}
+                  >
+                    <td className="w-8 px-3 py-3 align-top">
+                      <ChevronDown className={cn("size-4 text-creme/40 transition-transform", aberta && "rotate-180")} />
+                    </td>
+                    <td className="px-3 py-3 align-top"><Status status={l.situacao} /></td>
+                    <td className="max-w-[22rem] px-3 py-3 align-top">
+                      <div className="font-medium text-creme">{l.ativo || "—"}</div>
+                      <div className="mt-0.5 text-xs text-creme/50">
+                        {[l.emissor, l.codigo && `cód. ${l.codigo}`, l.dataAquisicao && `aquisição ${l.dataAquisicao}`].filter(Boolean).join(" · ")}
+                      </div>
+                    </td>
+                    <CelulaCampo c={l.campos.valor} />
+                    <CelulaCampo c={l.campos.emissao} />
+                    <CelulaCampo c={l.campos.vencimento} />
+                    <td className="px-3 py-3 align-top">
+                      <Status status={l.campos.emissor.status} titulo={l.campos.emissor.nota} />
+                      {l.campos.emissor.status !== "Confere" && l.campos.emissor.documentos && (
+                        <div className="mt-1 max-w-[12rem] text-xs text-creme/55">{l.campos.emissor.documentos}</div>
+                      )}
+                    </td>
+                    <CelulaWp l={l} />
+                  </tr>
+                  {aberta && (
+                    <tr className="bg-creme/[0.02]">
+                      <td colSpan={8}><Detalhe l={l} /></td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function Inventario({ resultado }: { resultado: ResultadoCompleto }) {
+  const { documentos, ignorados } = resultado;
+  return (
+    <details className="group rounded-2xl border border-border bg-card">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+        <span className="flex items-center gap-3 text-creme">
+          <FileText className="size-4 text-creme/60" />
+          {documentos.length} documento(s) lido(s) · {ignorados.length} não lido(s)
+        </span>
+        <ChevronDown className="size-4 text-creme/50 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="overflow-x-auto border-t border-border">
+        <table className="w-full min-w-[860px] text-xs">
+          <thead className="text-left text-creme/50">
+            <tr>
+              {["Arquivo", "Tipo", "Páginas", "Cita CNPJ do fundo", "Ligado a", "Observação"].map((t) => (
+                <th key={t} className="px-4 py-2.5 font-medium">{t}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {documentos.map((d) => (
+              <tr key={d.caminho} className="border-t border-creme/[0.06] align-top">
+                <td className="max-w-[22rem] break-words px-4 py-2 text-creme/85">{d.caminho}</td>
+                <td className="px-4 py-2 text-creme/60">{d.tipo}</td>
+                <td className="whitespace-nowrap px-4 py-2 text-creme/60">{d.paginas}</td>
+                <td className="px-4 py-2 text-creme/60">{d.citaCnpjFundo ? "Sim" : "Não"}</td>
+                <td className="max-w-[20rem] px-4 py-2 text-creme/70">{d.vinculos.join(" · ") || "—"}</td>
+                <td className="px-4 py-2 text-creme/55">{d.observacao}</td>
+              </tr>
+            ))}
+            {ignorados.map((i) => (
+              <tr key={i.nome} className="border-t border-creme/[0.06] align-top">
+                <td className="px-4 py-2 text-creme/60">{i.nome}</td>
+                <td className="px-4 py-2 text-creme/40">—</td>
+                <td className="px-4 py-2 text-creme/40">—</td>
+                <td className="px-4 py-2 text-creme/40">—</td>
+                <td className="px-4 py-2 text-creme/40">—</td>
+                <td className="px-4 py-2 text-aviso/80">{i.motivo}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
