@@ -1,0 +1,42 @@
+{
+  "name": "bate-carteira-lastro",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1",
+    "lint": "eslint",
+    "test": "vitest run",
+    "postinstall": "node scripts/copiar-pdfjs.mjs",
+    "test:real": "vitest run tests/real.test.ts --silent=false"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.9.0",
+    "class-variance-authority": "^0.7.1",
+    "cn": "^0.5.2",
+    "exceljs": "^4.4.0",
+    "framer-motion": "^14.12.0",
+    "idb-keyval": "^6.3.0",
+    "jszip": "^3.10.2",
+    "lucide-react": "^1.72.0",
+    "next": "16.4.6",
+    "pdfjs-dist": "^6.5.438",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "shadcn": "^4.23.0",
+    "tw-animate-css": "^1.4.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "4.3.3",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.6",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5",
+    "vitest": "^5.1.0"
+  }
+}
