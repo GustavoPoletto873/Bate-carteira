@@ -156,8 +156,15 @@ function emissoresCitados(doc: Documento) {
   return achados;
 }
 
-/** Número da operação no nome do arquivo ('789770_12692_TCNC_...' → '12692'). */
+const RE_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/**
+ * Operação no nome do arquivo: o número ('789770_12692_TCNC_...' → '12692') ou o identificador que a plataforma de
+ * assinatura repete nos arquivos da mesma cessão ('duplicata_assinada<uuid>.pdf' e 'folha_assinatura<uuid>.pdf').
+ */
 export function grupoDoNome(nome: string): string {
+  const uuid = nome.match(RE_UUID);
+  if (uuid) return uuid[0].toLowerCase();
   return nome.split(/[_\-. ]+/).find((parte) => /^\d{5}$/.test(parte)) ?? "";
 }
 

@@ -1,14 +1,19 @@
 /**
- * Leitura do Google Drive montado no computador (G:). Só funciona onde o app roda com acesso ao G:
+ * Leitura do Drive montado no computador (G:). Só funciona onde o app roda com acesso ao G:
  * (npm run dev / npm start no seu PC). Todo caminho é conferido contra DRIVE_RAIZES.
  */
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
+import {
+  interpretarWorkpaper, ordenarFundos, ordenarPastas, procurarAmostrasEstoques, SUBPASTAS, type Administradora,
+  type ArquivoDeRecebiveis, type CarteiraFormatada, type FundoDrive,
+} from "../lastro/drive-comum";
 import { ehCarteiraDoFundo, pastaDaData } from "../lastro/planilhas";
-import { palavras } from "../lastro/textos";
-import { DRIVE_BASE_PADRAO, DRIVE_RAIZES, SUBPASTAS } from "./config";
+import { DRIVE_BASE_PADRAO, DRIVE_RAIZES } from "./config";
+
+export type { FundoDrive };
 
 export class ErroDrive extends Error {}
 
@@ -36,7 +41,7 @@ async function existePasta(p: string): Promise<boolean> {
 export async function basePara(base?: string | null): Promise<string> {
   const p = resolverDentro(base || DRIVE_BASE_PADRAO);
   if (!(await existePasta(p))) {
-    throw new ErroDrive(`Pasta não encontrada: ${p}. Confira o caminho e se o Google Drive (G:) está conectado.`);
+    throw new ErroDrive(`Pasta não encontrada: ${p}. Confira o caminho e se o Drive (G:) está conectado.`);
   }
   return p;
 }
@@ -51,63 +56,48 @@ export async function driveDisponivel(): Promise<boolean> {
 
 // ------------------------------------------------------------------ fundos (workpapers)
 
-export interface FundoDrive {
-  fundo: string;
-  cnpj: string;
-  arquivo: string;
-  caminho: string;
-  pasta: string;
-  modificado: string;
-}
-
 export async function listarFundos(base: string): Promise<FundoDrive[]> {
   const fundos: FundoDrive[] = [];
   for (const sub of SUBPASTAS.workpapers) {
     const pasta = path.join(base, sub);
     if (!(await existePasta(pasta))) continue;
     for (const e of await readdir(pasta, { withFileTypes: true })) {
-      if (!e.isFile() || !/^WP_.+\.xls[xm]?$/i.test(e.name) || e.name.startsWith("~$")) continue;
-      const m = e.name.match(/^WP_(.+?)(?:_(\d{14}))?\.xls[xm]?$/i);
+      const wp = e.isFile() ? interpretarWorkpaper(e.name) : null;
+      if (!wp) continue;
       const caminho = path.join(pasta, e.name);
       const info = await stat(caminho).catch(() => null);
-      fundos.push({
-        fundo: (m?.[1] ?? e.name).trim(), cnpj: m?.[2] ?? "", arquivo: e.name, caminho, pasta: sub,
-        modificado: info ? info.mtime.toISOString() : "",
-      });
+      fundos.push({ ...wp, arquivo: e.name, caminho, pasta: sub, modificado: info ? info.mtime.toISOString() : "" });
     }
   }
-  return fundos.sort((a, b) => a.fundo.localeCompare(b.fundo, "pt-BR"));
+  return ordenarFundos(fundos);
 }
 
 // ------------------------------------------------------------------ pasta de lastro do fundo
 
-const GENERICOS = new Set([
-  "fidc", "fundo", "fundos", "de", "investimento", "investimentos", "em", "direitos", "direito", "creditorios",
-  "creditorio", "resp", "responsabilidade", "limitada", "ltda", "np", "nao", "padronizado", "padronizados", "classe",
-  "unica", "fic", "lp", "rl", "fiagro", "fii", "fi", "sa", "s", "a", "do", "da", "dos", "das", "e", "multissetorial",
-]);
-
-function tokens(nome: string): string[] {
-  return palavras(nome).split(" ").filter((t) => t && !GENERICOS.has(t));
-}
-
-export function pontuar(fundo: string, cnpj: string, pasta: string): number {
-  if (cnpj && pasta.replace(/\D/g, "").includes(cnpj)) return 1;
-  const f = new Set(tokens(fundo));
-  const p = tokens(pasta);
-  if (!f.size || !p.length) return 0;
-  const comuns = p.filter((t) => f.has(t)).length;
-  return 0.7 * (comuns / p.length) + 0.3 * (comuns / f.size);
-}
-
 export async function pastasDeLastro(base: string, fundo: string, cnpj: string) {
-  const raiz = path.join(base, SUBPASTAS.lastro);
-  if (!(await existePasta(raiz))) throw new ErroDrive(`Não achei a pasta "${SUBPASTAS.lastro}" em ${base}.`);
-  const pastas = (await readdir(raiz, { withFileTypes: true }))
-    .filter((e) => e.isDirectory())
-    .map((e) => ({ nome: e.name, caminho: path.join(raiz, e.name), pontos: pontuar(fundo, cnpj, e.name) }))
-    .sort((a, b) => b.pontos - a.pontos || a.nome.localeCompare(b.nome, "pt-BR"));
-  return { raiz, pastas };
+  for (const nome of SUBPASTAS.lastro) {
+    const raiz = path.join(base, nome);
+    if (!(await existePasta(raiz))) continue;
+    const pastas = (await readdir(raiz, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => ({ nome: e.name, caminho: path.join(raiz, e.name) }));
+    return { raiz, pastas: ordenarPastas(fundo, cnpj, pastas) };
+  }
+  throw new ErroDrive(`Não achei a pasta "${SUBPASTAS.lastro[0]}" em ${base}.`);
+}
+
+// ------------------------------------------------------------------ administradoras do trimestre
+
+/** Pastas com _Workpapers ao lado da pasta atual (…\2T2026\PLANNER, …\2T2026\ID…), ou dentro dela se for o trimestre. */
+export async function listarAdministradoras(base: string): Promise<Administradora[]> {
+  const temWp = (p: string) => existePasta(path.join(p, SUBPASTAS.workpapers[0]));
+  const trimestre = (await temWp(base)) ? path.dirname(base) : base;
+  const lista: Administradora[] = [];
+  for (const e of await readdir(trimestre, { withFileTypes: true })) {
+    const p = path.join(trimestre, e.name);
+    if (e.isDirectory() && (await temWp(p))) lista.push({ nome: e.name, base: p });
+  }
+  return lista.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 }
 
 // ------------------------------------------------------------------ arquivos
@@ -154,7 +144,7 @@ export async function responderArquivo(caminho: string): Promise<Response> {
 }
 
 /** <id>_<cnpj>_<dd.mm.aaaa>_BRITECH.xlsx da data-base em _Carteiras\FORMATADA (ou null). */
-export async function carteiraFormatada(base: string, cnpj: string, dataBase: string | null) {
+export async function carteiraFormatada(base: string, cnpj: string, dataBase: string | null): Promise<CarteiraFormatada | null> {
   const raiz = path.join(base, SUBPASTAS.carteiras);
   const sub = path.join(raiz, pastaDaData(dataBase));
   for (const pasta of [sub, raiz]) {
@@ -163,4 +153,13 @@ export async function carteiraFormatada(base: string, cnpj: string, dataBase: st
     if (achado) return { caminho: path.join(pasta, achado), arquivo: achado, idCarteira: achado.match(/^(\d+)_/)?.[1] ?? "" };
   }
   return null;
+}
+
+/** Amostra e estoque do fundo nas pastas da administradora (administradoras sem Britech). */
+export async function amostrasEstoques(base: string, fundo: string, cnpj: string): Promise<ArquivoDeRecebiveis[]> {
+  return procurarAmostrasEstoques({
+    itens: async (rel) => (await readdir(path.join(base, rel), { withFileTypes: true }))
+      .map((e) => ({ nome: e.name, pasta: e.isDirectory() })),
+    caminho: (rel) => path.join(base, rel),
+  }, fundo, cnpj);
 }

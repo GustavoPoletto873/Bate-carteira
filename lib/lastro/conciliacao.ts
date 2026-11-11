@@ -9,7 +9,7 @@
  */
 import { achar, contem, temTexto, trecho, type Achado, type Documento } from "./documentos";
 import type { LinhaWP, Posicao } from "./planilhas";
-import { codigoBritech, fmtData, fmtValor, nomeEssencial, numeroEmissaoBritech, soDigitos } from "./textos";
+import { codigoBritech, fmtData, fmtValor, nomeEssencial, numeroEmissaoBritech, palavras, soDigitos } from "./textos";
 
 export const TOLERANCIA_CENTAVOS = 1;
 
@@ -21,6 +21,15 @@ export type ChaveCampo = "valor" | "emissao" | "vencimento" | "emissor";
 export const CAMPOS: [ChaveCampo, string][] = [
   ["valor", "VL Aplic."], ["emissao", "Dt. Emissão"], ["vencimento", "Dt. Vencimento"], ["emissor", "Emissor"],
 ];
+
+/** Carteira Britech (títulos) ou estoque/amostra de direitos creditórios (recebíveis). */
+export type TipoCarteira = "titulos" | "recebiveis";
+
+/** Rótulos dos campos conforme o tipo de carteira (no recebível, o "emissor" conferido é o sacado). */
+export function camposDe(tipo: TipoCarteira): [ChaveCampo, string][] {
+  if (tipo === "titulos") return CAMPOS;
+  return [["valor", "Valor"], ["emissao", "Dt. Emissão"], ["vencimento", "Dt. Vencimento"], ["emissor", "Sacado"]];
+}
 
 export interface Campo {
   status: StatusCampo;
@@ -45,6 +54,8 @@ export interface LinhaResultado {
   id: number;
   ativo: string;
   emissor: string;
+  /** cedente do recebível ("" no título) */
+  cedente: string;
   codigo: string;
   valorAplicado: string;
   dataAquisicao: string;
@@ -68,6 +79,7 @@ export interface ItemInventario {
 }
 
 export interface ResultadoConferencia {
+  tipo: TipoCarteira;
   linhas: LinhaResultado[];
   documentos: ItemInventario[];
   contagem: Partial<Record<Situacao, number>>;
@@ -98,18 +110,43 @@ function emissorNoDoc(doc: Documento, chave: string): Achado<string> | null {
   return achado;
 }
 
+/** Valores procurados nos documentos: o VL Aplic. e, no recebível, também o valor de face (o que a duplicata/CCB traz). */
+function valoresAlvo(pos: Posicao): number[] {
+  return pos.valorNominal !== null && pos.valorNominal !== pos.valorAplicado ? [pos.valorAplicado, pos.valorNominal] : [pos.valorAplicado];
+}
+
+/**
+ * Nome do emissor/sacado para procurar no texto. Os estoques cortam o nome em 25 caracteres
+ * ("CONSTRUTORA EXEMPLO E ACA"): a última palavra, provavelmente cortada, sai da busca.
+ */
+function chaveDoNome(pos: Posicao): string {
+  const chave = nomeEssencial(pos.emissor);
+  const tokens = chave.split(" ");
+  return pos.tipo === "recebivel" && pos.emissor.trim().length >= 25 && tokens.length > 1 ? tokens.slice(0, -1).join(" ") : chave;
+}
+
+/** Número do documento do recebível em palavras ("50001-001" → "50001 001"); vazio se for curto demais para ser único. */
+function numeroDoRecebivel(pos: Posicao): string {
+  if (pos.tipo !== "recebivel") return "";
+  const p = palavras(pos.codigo).trim();
+  return soDigitos(p).length >= 4 ? p : "";
+}
+
 export function vincular(pos: Posicao, docs: Documento[], tolerancia = TOLERANCIA_CENTAVOS): Vinculos {
-  const chaveEmissor = nomeEssencial(pos.emissor);
-  const codigo = codigoBritech(pos.ativo);
-  const numEmissao = numeroEmissaoBritech(pos.ativo);
-  const direto = docs.filter((d) => d.valores.some((a) => Math.abs(a.valor - pos.valorAplicado) <= tolerancia));
+  const chaveEmissor = chaveDoNome(pos);
+  const titulo = pos.tipo !== "recebivel";
+  const codigo = titulo ? codigoBritech(pos.ativo) : "";
+  const numEmissao = titulo ? numeroEmissaoBritech(pos.ativo) : null;
+  const numeroDoc = numeroDoRecebivel(pos);
+  const alvos = valoresAlvo(pos);
+  const direto = docs.filter((d) => d.valores.some((a) => alvos.some((v) => Math.abs(a.valor - v) <= tolerancia)));
   const grupos = new Set(direto.map((d) => d.grupo).filter(Boolean));
   const mesmaOp: Documento[] = [];
   const mesmoEmissor: Documento[] = [];
   for (const d of docs) {
     if (direto.includes(d) || !temTexto(d)) continue;
     const citaEmissor = emissorNoDoc(d, chaveEmissor) !== null;
-    if ((d.grupo && grupos.has(d.grupo)) || (codigo && contem(d, codigo))
+    if ((d.grupo && grupos.has(d.grupo)) || (codigo && contem(d, codigo)) || (numeroDoc && contem(d, numeroDoc))
       || (citaEmissor && numEmissao !== null && d.numerosEmissao.has(numEmissao))) {
       mesmaOp.push(d);
     } else if (citaEmissor) {
@@ -128,22 +165,39 @@ function nivelDe(doc: Documento, v: Vinculos): Nivel {
 // ------------------------------------------------------------------ avaliação de cada campo
 
 function avaliarValor(pos: Posicao, v: Vinculos, evid: Evidencia[], tolerancia: number): Campo {
-  const alvo = pos.valorAplicado;
-  const c = campo({ britech: fmtValor(alvo) });
+  const alvos = valoresAlvo(pos);
+  const face = alvos.length > 1 ? pos.valorNominal : null;
+  // no recebível o documento traz o valor de face: é ele a referência para "valor parecido"
+  const alvo = face ?? pos.valorAplicado;
+  const c = campo({ britech: face !== null ? `${fmtValor(pos.valorAplicado)} (face ${fmtValor(face)})` : fmtValor(pos.valorAplicado) });
   if (v.direto.length) {
     const achados: string[] = [];
     let maior = 0;
+    let soFace = true;
     for (const d of v.direto) {
-      const a = d.valores.find((x) => Math.abs(x.valor - alvo) <= tolerancia);
+      let a: Achado<number> | undefined;
+      let ref = 0;
+      for (const x of d.valores) {
+        ref = alvos.find((t) => Math.abs(x.valor - t) <= tolerancia) ?? -1;
+        if (ref >= 0) {
+          a = x;
+          break;
+        }
+      }
       if (!a) continue;
+      if (ref === pos.valorAplicado) soFace = false;
       achados.push(fmtValor(a.valor));
-      maior = Math.max(maior, Math.abs(a.valor - alvo));
+      maior = Math.max(maior, Math.abs(a.valor - ref));
       evid.push({ campo: "valor", valor: fmtValor(a.valor), confere: true, documento: d.nome, trecho: trecho(d, a.ini, a.fim), nivel: "direto" });
     }
     c.status = "Confere";
     c.documentos = unicos(achados).join(" | ");
     c.fontes = v.direto.map((d) => d.nome);
-    if (maior > 0) c.nota = `diferença de R$ ${fmtValor(maior)} (dentro da tolerância de R$ ${fmtValor(tolerancia)})`;
+    const notas = [
+      face !== null && soFace ? "o documento traz o valor de face (nominal); o de aquisição não aparece nele" : "",
+      maior > 0 ? `diferença de R$ ${fmtValor(maior)} (dentro da tolerância de R$ ${fmtValor(tolerancia)})` : "",
+    ];
+    c.nota = notas.filter(Boolean).join("; ");
     return c;
   }
   // nenhum documento com o valor: algum da mesma operação traz um valor parecido (erro de digitação)?
@@ -160,16 +214,36 @@ function avaliarValor(pos: Posicao, v: Vinculos, evid: Evidencia[], tolerancia: 
     c.status = "Diverge";
     c.documentos = unicos(parecidos.map(([, a]) => fmtValor(a.valor))).join(" | ");
     c.fontes = unicos(parecidos.map(([d]) => d.nome));
-    c.nota = "nenhum documento traz o VL Aplic. da Britech; documentos da mesma operação trazem outro valor";
+    c.nota = pos.tipo === "recebivel"
+      ? "nenhum documento traz o valor do recebível; documentos do mesmo número trazem outro valor"
+      : "nenhum documento traz o VL Aplic. da Britech; documentos da mesma operação trazem outro valor";
     return c;
   }
+  const quem = pos.tipo === "recebivel" ? "o número nem o sacado" : "o emissor";
   c.nota = v["mesma operação"].length || v["mesmo emissor"].length
-    ? "há documentos do emissor, mas nenhum traz este valor"
-    : "nenhum documento da pasta traz este valor nem cita o emissor";
+    ? "há documentos ligados a este item, mas nenhum traz este valor"
+    : `nenhum documento da pasta traz este valor, ${quem}`;
   return c;
 }
 
-function avaliarData(chaveCampo: "emissao" | "vencimento", alvo: string | null, v: Vinculos, evid: Evidencia[]): Campo {
+/** Dias desde 1970 de uma data ISO. */
+const dias = (iso: string) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86_400_000;
+
+/** A data dos documentos mais perto da esperada (até 31 dias), para mostrar a diferença em vez de "não localizado". */
+function dataMaisProxima(docs: Documento[], alvo: string): [Documento, Achado<string>, number] | null {
+  let melhor: [Documento, Achado<string>, number] | null = null;
+  for (const d of docs) {
+    for (const a of d.datas) {
+      const dif = Math.abs(dias(a.valor) - dias(alvo));
+      if (dif <= 31 && (!melhor || dif < melhor[2])) melhor = [d, a, dif];
+    }
+  }
+  return melhor;
+}
+
+function avaliarData(
+  chaveCampo: "emissao" | "vencimento", alvo: string | null, v: Vinculos, evid: Evidencia[], fonte = "a Britech", recebivel = false,
+): Campo {
   const atributo = chaveCampo === "emissao" ? "datasEmissao" : "datasVencimento";
   const rotulo = chaveCampo === "emissao" ? "emissão" : "vencimento";
   const c = campo({ britech: fmtData(alvo) });
@@ -185,13 +259,27 @@ function avaliarData(chaveCampo: "emissao" | "vencimento", alvo: string | null, 
     if (semRotulo.length) {
       const [d, a] = semRotulo[0];
       evid.push({ campo: chaveCampo, valor: fmtData(a.valor), confere: true, documento: d.nome, trecho: trecho(d, a.ini, a.fim), nivel: nivelDe(d, v) });
-      c.status = "Verificar";
+      // duplicatas e termos de cessão trazem as datas em tabela, longe do rótulo: num documento ligado ao recebível
+      // pelo valor ou pelo número, a data exata basta
+      c.status = recebivel ? "Confere" : "Verificar";
       c.documentos = fmtData(alvo);
       c.fontes = unicos(semRotulo.map(([doc]) => doc.nome));
-      c.nota = `a data aparece no documento, mas sem o rótulo de data de ${rotulo}`;
-    } else {
-      c.nota = `nenhum documento ligado à posição traz a data de ${rotulo}`;
+      c.nota = recebivel
+        ? `a data aparece no documento do recebível (sem o rótulo de ${rotulo} ao lado)`
+        : `a data aparece no documento, mas sem o rótulo de data de ${rotulo}`;
+      return c;
     }
+    const proxima = recebivel && alvo ? dataMaisProxima(principais, alvo) : null;
+    if (proxima) {
+      const [d, a, dif] = proxima;
+      evid.push({ campo: chaveCampo, valor: fmtData(a.valor), confere: false, documento: d.nome, trecho: trecho(d, a.ini, a.fim), nivel: nivelDe(d, v) });
+      c.status = "Verificar";
+      c.documentos = fmtData(a.valor);
+      c.fontes = [d.nome];
+      c.nota = `a data de ${rotulo} d${fonte} (${fmtData(alvo)}) não aparece no documento; a mais próxima é ${fmtData(a.valor)} (${dif} dia${dif > 1 ? "s" : ""} de diferença)`;
+      return c;
+    }
+    c.nota = `nenhum documento ligado à posição traz a data de ${rotulo}`;
     return c;
   }
   for (const [d, a, nivel] of achados) {
@@ -203,7 +291,7 @@ function avaliarData(chaveCampo: "emissao" | "vencimento", alvo: string | null, 
   c.fontes = unicos(achados.map(([d]) => d.nome));
   if (!alvo) {
     c.status = "Verificar";
-    c.nota = `a Britech não tem data de ${rotulo}; veja a data dos documentos`;
+    c.nota = `${fonte} não tem data de ${rotulo}; veja a data dos documentos`;
   } else if (iguais.length && !diferentes.length) {
     c.status = "Confere";
     if (soEmissor) c.nota = "confirmado só por documento do mesmo emissor (sem o valor da posição)";
@@ -214,7 +302,7 @@ function avaliarData(chaveCampo: "emissao" | "vencimento", alvo: string | null, 
     c.status = soEmissor ? "Verificar" : "Diverge";
     c.nota = soEmissor
       ? `documentos do mesmo emissor trazem outra data de ${rotulo}`
-      : `a data de ${rotulo} da Britech não aparece nos documentos da posição`;
+      : `a data de ${rotulo} d${fonte} não aparece nos documentos da posição`;
   }
   return c;
 }
@@ -233,6 +321,15 @@ function avaliarEmissor(pos: Posicao, v: Vinculos, evid: Evidencia[]): Campo {
     }
     if (comNome.length) {
       return { ...c, status: "Confere", documentos: pos.emissor, fontes: comNome.map((d) => d.nome) };
+    }
+    // recebível: o documento pode citar só o cedente (ex.: termo de cessão sem a lista de sacados)
+    const chaveCedente = pos.cedente ? chaveDoNome({ ...pos, emissor: pos.cedente }) : "";
+    const comCedente = chaveCedente ? principais.filter((d) => emissorNoDoc(d, chaveCedente)) : [];
+    if (comCedente.length) {
+      return {
+        ...c, status: "Verificar", documentos: `cedente ${pos.cedente}`, fontes: comCedente.map((d) => d.nome),
+        nota: "os documentos citam o cedente, mas não o sacado",
+      };
     }
     const citados = principais.flatMap((d) => d.emissoresCitados.map((a) => [d, a] as const));
     for (const [d, a] of citados) {
@@ -254,7 +351,7 @@ function avaliarEmissor(pos: Posicao, v: Vinculos, evid: Evidencia[]): Campo {
       nota: "o nome aparece nos documentos, mas nenhum deles traz o valor ou o código desta posição",
     };
   }
-  c.nota = "o emissor não aparece em nenhum documento da pasta";
+  c.nota = pos.tipo === "recebivel" ? "o sacado não aparece em nenhum documento da pasta" : "o emissor não aparece em nenhum documento da pasta";
   return c;
 }
 
@@ -278,6 +375,8 @@ export function casarWp(posicoes: Posicao[], linhasWp: LinhaWP[], tolerancia = T
   tentar((p, w) => mesmoValor(p, w) && mesmoCodigo(p, w));
   tentar(mesmoValor);
   tentar((p, w) => mesmoCodigo(p, w) && w.dataEmissao === p.dataEmissao && w.dataVencimento === p.dataVencimento);
+  // recebível: mesmo número de documento e mesmo vencimento (alguns estoques não trazem a data de emissão)
+  tentar((p, w) => p.tipo === "recebivel" && mesmoCodigo(p, w) && w.dataVencimento === p.dataVencimento);
   return { casados, sobrando: linhasWp.filter((_, k) => !usados.has(k)) };
 }
 
@@ -291,6 +390,20 @@ function compararWp(campos: Record<ChaveCampo, Campo>, pos: Posicao, w: LinhaWP,
     campos[k].wp = textoWp;
     campos[k].wpStatus = igual ? "Confere" : bruto === null ? "Não localizado" : "Diverge";
   }
+}
+
+/** Acima disto (estoque inteiro), só os itens que estão na WP_Termo — a amostra — são conferidos. */
+export const LIMITE_ITENS_CARTEIRA = 1500;
+
+export function recortarPelaWp(posicoes: Posicao[], linhasWp: LinhaWP[]): { posicoes: Posicao[]; aviso: string } {
+  if (posicoes.length <= LIMITE_ITENS_CARTEIRA || !linhasWp.length) return { posicoes, aviso: "" };
+  const numeros = new Set(linhasWp.map((w) => soDigitos(w.numeroDoc)).filter(Boolean));
+  const valores = new Set(linhasWp.map((w) => `${w.valorAquisicao}|${w.dataVencimento}`));
+  const recorte = posicoes.filter((p) => numeros.has(soDigitos(p.codigo)) || valores.has(`${p.valorAplicado}|${p.dataVencimento}`));
+  return {
+    posicoes: recorte,
+    aviso: `A carteira tem ${posicoes.length.toLocaleString("pt-BR")} itens: foram conferidos só os ${recorte.length} que estão na WP_Termo (amostra).`,
+  };
 }
 
 // ------------------------------------------------------------------ conferência completa
@@ -308,6 +421,8 @@ export function conferir(
   posicoes: Posicao[], linhasWp: LinhaWP[], docs: Documento[], cnpjFundo = "", tolerancia = TOLERANCIA_CENTAVOS,
 ): ResultadoConferencia {
   const { casados, sobrando } = casarWp(posicoes, linhasWp, tolerancia);
+  const tipo: TipoCarteira = posicoes.some((p) => p.tipo === "recebivel") ? "recebiveis" : "titulos";
+  const fonte = tipo === "recebiveis" ? "a carteira" : "a Britech";
   const linhas: LinhaResultado[] = [];
   const vinculosPorDoc = new Map<number, string[]>();
 
@@ -316,8 +431,8 @@ export function conferir(
     const evid: Evidencia[] = [];
     const campos: Record<ChaveCampo, Campo> = {
       valor: avaliarValor(pos, v, evid, tolerancia),
-      emissao: avaliarData("emissao", pos.dataEmissao, v, evid),
-      vencimento: avaliarData("vencimento", pos.dataVencimento, v, evid),
+      emissao: avaliarData("emissao", pos.dataEmissao, v, evid, fonte, pos.tipo === "recebivel"),
+      vencimento: avaliarData("vencimento", pos.dataVencimento, v, evid, fonte, pos.tipo === "recebivel"),
       emissor: avaliarEmissor(pos, v, evid),
     };
     const w = casados.get(i);
@@ -327,7 +442,7 @@ export function conferir(
       for (const d of v[nivel]) vinculosPorDoc.set(d.id, [...(vinculosPorDoc.get(d.id) ?? []), `${rotulo} (${nivel})`]);
     }
     linhas.push({
-      id: i + 1, ativo: pos.ativo, emissor: pos.emissor, codigo: pos.codigo, valorAplicado: fmtValor(pos.valorAplicado),
+      id: i + 1, ativo: pos.ativo, emissor: pos.emissor, cedente: pos.cedente, codigo: pos.codigo, valorAplicado: fmtValor(pos.valorAplicado),
       dataAquisicao: fmtData(pos.dataAquisicao), noWp: !!w, wpLinha: w?.linhaExcel ?? null,
       situacao: situacaoDe(campos, !!w), campos, docsDiretos: v.direto.length,
       docsMesmaOperacao: v["mesma operação"].length, evidencias: evid,
@@ -336,13 +451,15 @@ export function conferir(
 
   for (const w of sobrando) {
     const campos = {
-      valor: campo({ status: "—", wp: fmtValor(w.valorAquisicao), wpStatus: "Diverge", nota: "linha do WP_Termo sem posição correspondente na carteira Britech" }),
+      valor: campo({ status: "—", wp: fmtValor(w.valorAquisicao), wpStatus: "Diverge", nota: `linha do WP_Termo sem posição correspondente n${fonte}` }),
       emissao: campo({ status: "—", wp: fmtData(w.dataEmissao), wpStatus: "Diverge" }),
       vencimento: campo({ status: "—", wp: fmtData(w.dataVencimento), wpStatus: "Diverge" }),
       emissor: campo({ status: "—", wpStatus: "Diverge" }),
     };
     linhas.push({
-      id: linhas.length + 1, ativo: w.tipoRecebivel, emissor: w.nomeCedente || w.nomeSacado, codigo: w.numeroDoc,
+      id: linhas.length + 1, ativo: [w.tipoRecebivel, tipo === "recebiveis" ? w.numeroDoc : ""].filter(Boolean).join(" "),
+      emissor: tipo === "recebiveis" ? w.nomeSacado : w.nomeCedente || w.nomeSacado, cedente: tipo === "recebiveis" ? w.nomeCedente : "",
+      codigo: w.numeroDoc,
       valorAplicado: "", dataAquisicao: fmtData(w.dataAquisicao), noWp: true, wpLinha: w.linhaExcel, situacao: "Só no WP",
       campos, docsDiretos: 0, docsMesmaOperacao: 0, evidencias: [],
     });
@@ -360,5 +477,5 @@ export function conferir(
 
   const contagem: Partial<Record<Situacao, number>> = {};
   for (const l of linhas) contagem[l.situacao] = (contagem[l.situacao] ?? 0) + 1;
-  return { linhas, documentos, contagem };
+  return { tipo, linhas, documentos, contagem };
 }

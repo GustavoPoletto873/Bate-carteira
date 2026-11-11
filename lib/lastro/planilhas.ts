@@ -136,10 +136,19 @@ export function resumoWorkpaper(wp: Workpaper) {
 
 export interface Posicao {
   linha: number;
+  /** título da carteira Britech, ou recebível de um estoque/amostra (duplicata, CCB…) */
+  tipo: "titulo" | "recebivel";
+  /** código do título; no recebível, o número do documento (NU_DOCUMENTO) */
   codigo: string;
   ativo: string;
+  /** emissor do título; no recebível, o sacado (devedor) */
   emissor: string;
+  /** cedente do recebível ("" no título) */
+  cedente: string;
+  /** VL Aplic.; no recebível, o valor de aquisição (ou o nominal, se o arquivo não tiver aquisição) */
   valorAplicado: number;
+  /** valor de face do recebível — é o que aparece na duplicata/CCB (null no título) */
+  valorNominal: number | null;
   valorPresente: number | null;
   dataAquisicao: string | null;
   dataEmissao: string | null;
@@ -229,8 +238,8 @@ export function posicoesDaTabela(linhas: Linha[], primeira = 1): Posicao[] {
     const vencimento = paraData(col("dataVencimento"));
     if (!emissor || valor === null || !(emissao || vencimento)) return; // cotas, caixa, valores a liquidar
     posicoes.push({
-      linha: primeira + iCab + 1 + k, codigo: texto(col("codigo")), ativo: texto(col("ativo")), emissor,
-      valorAplicado: valor, valorPresente: paraCentavos(col("valorPresente")),
+      linha: primeira + iCab + 1 + k, tipo: "titulo", codigo: texto(col("codigo")), ativo: texto(col("ativo")), emissor,
+      cedente: "", valorAplicado: valor, valorNominal: null, valorPresente: paraCentavos(col("valorPresente")),
       dataAquisicao: paraData(col("dataAquisicao")), dataEmissao: emissao, dataVencimento: vencimento,
       grupo: texto(col("grupo")),
     });
@@ -238,6 +247,73 @@ export function posicoesDaTabela(linhas: Linha[], primeira = 1): Posicao[] {
   return posicoes;
 }
 
+// ------------------------------------------------------------------ estoque / amostra de recebíveis
+
+/**
+ * Colunas do estoque e da amostra exportados pelos sistemas das administradoras sem Britech (Fromtis, Sinqia,
+ * MAPS…): NU_DOCUMENTO, NOME_SACADO, NOME_CEDENTE, VALOR_AQUISICAO, VALOR_NOMINAL, DATA_EMISSAO,
+ * DATA_VENCIMENTO_ORIGINAL… (com "_" ou espaço). Para cada campo, o primeiro nome achado vale.
+ */
+const COLUNAS_RECEBIVEIS: Record<string, string[]> = {
+  numero: ["nu documento", "numero documento", "num documento", "numero do documento", "n documento"],
+  seuNumero: ["seu numero"],
+  tipo: ["tipo recebivel", "tipo de recebivel"],
+  sacado: ["nome sacado", "nome do sacado", "sacado"],
+  cedente: ["nome cedente", "nome do cedente", "cedente"],
+  valorAquisicao: ["valor aquisicao", "valor de aquisicao", "vl aquisicao"],
+  valorNominal: ["valor nominal", "valor de face", "vl nominal"],
+  valorPresente: ["valor presente", "vl presente"],
+  dataEmissao: ["data emissao", "data de emissao", "dt emissao"],
+  dataVencimento: ["data vencimento original", "data vencimento", "data de vencimento", "dt vencimento", "data vencimento ajustada"],
+  dataAquisicao: ["data aquisicao", "data de aquisicao", "dt aquisicao"],
+};
+
+function colunasDeRecebiveis(cabecalho: Linha): Map<string, number> | null {
+  const chaves = cabecalho.map(chave);
+  const mapa = new Map<string, number>();
+  for (const [campo, nomes] of Object.entries(COLUNAS_RECEBIVEIS)) {
+    const j = nomes.map((n) => chaves.indexOf(n)).find((i) => i >= 0);
+    if (j !== undefined) mapa.set(campo, j);
+  }
+  const ok = mapa.has("sacado") && (mapa.has("numero") || mapa.has("seuNumero"))
+    && (mapa.has("valorAquisicao") || mapa.has("valorNominal")) && mapa.has("dataVencimento");
+  return ok ? mapa : null;
+}
+
+export function recebiveisDaTabela(linhas: Linha[], primeira = 1): Posicao[] {
+  let iCab = -1;
+  let mapa: Map<string, number> | null = null;
+  for (let n = 0; n < Math.min(linhas.length, 41) && !mapa; n++) {
+    mapa = colunasDeRecebiveis(linhas[n] ?? []);
+    if (mapa) iCab = n;
+  }
+  if (!mapa) return [];
+  const m = mapa;
+  const posicoes: Posicao[] = [];
+  linhas.slice(iCab + 1).forEach((linha, k) => {
+    const col = (campo: string) => {
+      const i = m.get(campo);
+      return i === undefined ? null : linha?.[i] ?? null;
+    };
+    const aquisicao = paraCentavos(col("valorAquisicao"));
+    const nominal = paraCentavos(col("valorNominal"));
+    const valor = aquisicao ?? nominal;
+    const numero = texto(col("numero")) || texto(col("seuNumero"));
+    const sacado = texto(col("sacado"));
+    if (valor === null || (!numero && !sacado)) return; // linha de total ou em branco
+    const tipo = texto(col("tipo"));
+    posicoes.push({
+      linha: primeira + iCab + 1 + k, tipo: "recebivel", codigo: numero,
+      ativo: [tipo || "Recebível", numero].filter(Boolean).join(" "), emissor: sacado, cedente: texto(col("cedente")),
+      valorAplicado: valor, valorNominal: nominal, valorPresente: paraCentavos(col("valorPresente")),
+      dataAquisicao: paraData(col("dataAquisicao")), dataEmissao: paraData(col("dataEmissao")),
+      dataVencimento: paraData(col("dataVencimento")), grupo: tipo,
+    });
+  });
+  return posicoes;
+}
+
+/** Carteira Britech (títulos) ou estoque/amostra de recebíveis — o formato é reconhecido pelas colunas. */
 export function lerCarteira(bytes: Uint8Array, arquivo: string): Posicao[] {
   let wb: XLSX.WorkBook;
   try {
@@ -249,14 +325,19 @@ export function lerCarteira(bytes: Uint8Array, arquivo: string): Posicao[] {
       wb = XLSX.read(bytes, { type: "array", dense: true });
     }
   } catch (e) {
-    throw new ErroDeEntrada(`Não consegui ler a carteira Britech "${arquivo}". Envie o Excel exportado do PAS ou o _BRITECH.xlsx. (${String(e).slice(0, 120)})`);
+    throw new ErroDeEntrada(`Não consegui ler a carteira "${arquivo}". Envie o Excel da Britech, a amostra ou o estoque do fundo. (${String(e).slice(0, 120)})`);
   }
   for (const nome of wb.SheetNames) {
     const { linhas, primeira } = linhasDaAba(wb.Sheets[nome]);
-    const posicoes = posicoesDaTabela(linhas, primeira);
+    const posicoes = recebiveisDaTabela(linhas, primeira);
     if (posicoes.length) return posicoes;
+    const titulos = posicoesDaTabela(linhas, primeira);
+    if (titulos.length) return titulos;
   }
-  throw new ErroDeEntrada(`A carteira "${arquivo}" não tem as colunas esperadas (Emissor, VL Aplic./Vlr. Aquisição, Dt. Emissão, Dt. Vencimento) ou não tem nenhum título com emissor e datas.`);
+  throw new ErroDeEntrada(
+    `A carteira "${arquivo}" não tem as colunas esperadas: na Britech, Emissor, VL Aplic./Vlr. Aquisição, Dt. Emissão e Dt. Vencimento; `
+    + "no estoque/amostra, NU_DOCUMENTO, NOME_SACADO, VALOR_AQUISICAO (ou VALOR_NOMINAL) e DATA_VENCIMENTO.",
+  );
 }
 
 /** '<id>_<cnpj>_<dd.mm.aaaa>_BRITECH.xlsx' é a carteira deste fundo nesta data? */

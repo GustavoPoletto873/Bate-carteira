@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // cópias do pdf.js geradas pelo postinstall e o protótipo antigo em Python
+    "public/pdfjs/**",
+    "nix_auditoria/**",
   ]),
 ]);
 

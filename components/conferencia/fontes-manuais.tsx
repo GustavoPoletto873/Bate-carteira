@@ -5,9 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import { listarPasta, type FonteArquivo, type FontePasta } from "@/lib/lastro/fontes";
 import type { ArquivoEntrada } from "@/lib/lastro/pipeline";
 import { ehCarteiraDoFundo, lerWorkpaper, pastaDaData, type Workpaper } from "@/lib/lastro/planilhas";
-import { servidor, type CarteiraBritech, type StatusServidor } from "@/lib/lastro/servidor-cliente";
+import { servidor, type StatusServidor } from "@/lib/lastro/servidor-cliente";
 import { fmtData } from "@/lib/lastro/textos";
-import { opcoesDeCarteira } from "@/lib/lastro/carteiras";
+import { opcoesDeCarteira, type OpcaoCarteira } from "@/lib/lastro/carteiras";
 import { Alternador, CampoDataBase, Cartao, classeSelect, mensagem } from "./comum";
 import { SlotFonte } from "./slot-fonte";
 import type { Preparo, PropsFontes } from "./tipos";
@@ -33,6 +33,7 @@ async function localizarCarteira(pasta: FontePasta, cnpj: string, dataBase: stri
 /** Fontes escolhidas à mão (seletor de arquivo/pasta ou arrastar e soltar); a carteira também pode vir da API. */
 export function FontesManuais({ acoes, onMudar, status }: PropsFontes & { status: StatusServidor | null }) {
   const britechOk = !!status?.britech.configurada;
+  const adms = status?.britech.administradoras ?? [];
   const [wpFonte, setWpFonte] = useState<FonteArquivo | null>(null);
   const [wp, setWp] = useState<Workpaper | null>(null);
   const [wpErro, setWpErro] = useState("");
@@ -41,8 +42,10 @@ export function FontesManuais({ acoes, onMudar, status }: PropsFontes & { status
   const [carteiraArquivo, setCarteiraArquivo] = useState<FonteArquivo | null>(null);
   const [carteiraPasta, setCarteiraPasta] = useState<{ fonte: FontePasta; versao: number } | null>(null);
   const [busca, setBusca] = useState<{ chave: string; achada: ArquivoEntrada | null } | null>(null);
-  const [api, setApi] = useState<{ cnpj: string; lista: CarteiraBritech[]; erro: string } | null>(null);
+  const [api, setApi] = useState<{ cnpj: string; lista: OpcaoCarteira[]; erro: string } | null>(null);
   const [idCarteira, setIdCarteira] = useState("");
+  /** administradora quando o ID é digitado à mão (o CNPJ não foi achado em nenhuma Britech) */
+  const [admManual, setAdmManual] = useState("");
   const [lastro, setLastro] = useState<FontePasta | null>(null);
   const vez = useRef(0);
 
@@ -71,10 +74,11 @@ export function FontesManuais({ acoes, onMudar, status }: PropsFontes & { status
     setApi(null);
     setIdCarteira("");
     try {
-      const { carteiras } = await servidor.carteirasBritech(cnpj);
+      const { carteiras, falhas } = await servidor.carteirasBritech(cnpj);
       if (v !== vez.current) return;
       const { opcoes, padrao } = opcoesDeCarteira(carteiras);
-      setApi({ cnpj, lista: opcoes, erro: opcoes.length ? "" : "A Britech não tem carteira para este CNPJ." });
+      const naoConsultadas = falhas.length ? ` (não consegui consultar: ${falhas.map((x) => x.adm).join(", ")})` : "";
+      setApi({ cnpj, lista: opcoes, erro: opcoes.length ? "" : `Nenhuma Britech tem carteira para este CNPJ${naoConsultadas}. Informe o ID à mão.` });
       setIdCarteira(padrao);
     } catch (e) {
       if (v === vez.current) setApi({ cnpj, lista: [], erro: mensagem(e) });
@@ -105,10 +109,13 @@ export function FontesManuais({ acoes, onMudar, status }: PropsFontes & { status
 
   let carteira: Preparo["carteira"] | null = null;
   if (modoCarteira === "api") {
+    const opcao = api?.lista.find((c) => c.id === idCarteira);
+    const adm = opcao?.adm || admManual || adms[0]?.adm || "PLANNER";
+    const admNome = opcao?.admNome || adms.find((a) => a.adm === adm)?.nome || adm;
     if (idCarteira && dataEfetiva) {
       carteira = {
-        rotulo: `API Britech — carteira ${idCarteira} em ${fmtData(dataEfetiva)}`,
-        obter: async () => ({ bytes: await servidor.composicaoBritech(idCarteira, dataEfetiva), nome: `carteira_${idCarteira}_${dataEfetiva}.xlsx` }),
+        rotulo: `API Britech ${admNome} — carteira ${idCarteira} em ${fmtData(dataEfetiva)}`,
+        obter: async () => ({ bytes: await servidor.composicaoBritech(adm, idCarteira, dataEfetiva), nome: `carteira_${idCarteira}_${dataEfetiva}.xlsx` }),
       };
     }
   } else {
@@ -169,7 +176,7 @@ export function FontesManuais({ acoes, onMudar, status }: PropsFontes & { status
             titulo="Carteira Britech"
             icone={<Landmark className="size-5" />}
             pronto={!!carteira}
-            descricao={<>Composição da carteira na data-base, direto da API da Britech, achada pelo CNPJ do workpaper.</>}
+            descricao={<>Composição da carteira na data-base, direto da API da Britech da administradora, achada pelo CNPJ do workpaper.</>}
           >
             {alternador}
             {!wp ? (
@@ -180,15 +187,27 @@ export function FontesManuais({ acoes, onMudar, status }: PropsFontes & { status
               <div className="space-y-2">
                 {api.lista.length > 0 ? (
                   <select value={idCarteira} onChange={(e) => { onMudar(); setIdCarteira(e.target.value); }} className={classeSelect}>
-                    {api.lista.map((c) => <option key={c.id} value={c.id}>{c.id} — {c.nome}</option>)}
+                    {api.lista.map((c) => <option key={c.id} value={c.id}>{c.id} — {c.nome}{c.admNome ? ` (${c.admNome})` : ""}</option>)}
                   </select>
                 ) : (
-                  <input
-                    value={idCarteira}
-                    onChange={(e) => { onMudar(); setIdCarteira(e.target.value.replace(/\D/g, "")); }}
-                    placeholder="ID da carteira (ex.: 52230)"
-                    className={classeSelect}
-                  />
+                  <div className="flex gap-2">
+                    {adms.length > 1 && (
+                      <select
+                        aria-label="Britech da administradora"
+                        value={admManual || adms[0].adm}
+                        onChange={(e) => { onMudar(); setAdmManual(e.target.value); }}
+                        className={classeSelect}
+                      >
+                        {adms.map((a) => <option key={a.adm} value={a.adm}>{a.nome}</option>)}
+                      </select>
+                    )}
+                    <input
+                      value={idCarteira}
+                      onChange={(e) => { onMudar(); setIdCarteira(e.target.value.replace(/\D/g, "")); }}
+                      placeholder="ID da carteira (ex.: 52230)"
+                      className={classeSelect}
+                    />
+                  </div>
                 )}
                 {api.erro && <p className="text-xs text-erro">{api.erro}</p>}
               </div>
@@ -198,15 +217,15 @@ export function FontesManuais({ acoes, onMudar, status }: PropsFontes & { status
           <SlotFonte
             key={modoCarteira}
             numero="02"
-            titulo="Carteira Britech"
+            titulo="Carteira"
             icone={<Landmark className="size-5" />}
             descricao={modoCarteira === "pasta"
               ? <>A pasta das carteiras formatadas (<code className="text-creme/80">_Carteiras\FORMATADA</code>). O app acha o <code className="text-creme/80">&lt;id&gt;_&lt;cnpj&gt;_&lt;data&gt;_BRITECH.xlsx</code> do fundo.</>
-              : <>O <code className="text-creme/80">_BRITECH.xlsx</code> do fundo ou o Excel exportado do PAS (VL Aplic., Dt. Emissão, Dt. Vencto, Emissor).</>}
+              : <>O <code className="text-creme/80">_BRITECH.xlsx</code> do fundo, o Excel exportado do PAS ou, nas administradoras sem Britech, a amostra/estoque de recebíveis (<code className="text-creme/80">Amostra_…xlsx</code>, <code className="text-creme/80">…_Estoque_….xlsx/.csv</code>).</>}
             tipo={modoCarteira === "pasta" ? "pasta" : "arquivo"}
             memoria={modoCarteira === "pasta" ? "lastro-carteiras-pasta" : "lastro-carteira-arquivo"}
             extensoes={[".xlsx", ".xls", ".xlsm", ".csv"]}
-            descricaoTipos="Carteira Britech"
+            descricaoTipos="Carteira, amostra ou estoque"
             listar={false}
             escolhido={modoCarteira === "pasta" ? carteiraPasta?.fonte.nome ?? null : carteiraArquivo?.nome ?? null}
             onEscolher={(f) => {
