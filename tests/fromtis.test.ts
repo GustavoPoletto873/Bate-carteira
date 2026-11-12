@@ -73,6 +73,17 @@ describe("Fromtis SOAP", () => {
     expect(chamadas).toHaveBeenCalledTimes(1);
   });
 
+  it("senha errada como SOAP Fault (HTTP 500) também pausa a administradora", async () => {
+    const fault = vi.fn(async () => new Response(
+      "<soap:Envelope><soap:Body><soap:Fault><faultcode>soap:Server</faultcode><faultstring>Ocorreu um erro de autenticação. Msg: Bad credentials</faultstring></soap:Fault></soap:Body></soap:Envelope>",
+      { status: 500 },
+    ));
+    vi.stubGlobal("fetch", fault);
+    await expect(estoqueFromtis("TESTE", "11222333000181", "2026-06-30")).rejects.toThrow(/recusou o usuário e a senha \(Ocorreu um erro de autenticação/);
+    await expect(estoqueFromtis("TESTE", "11222333000181", "2026-06-30")).rejects.toThrow(/nova tentativa/);
+    expect(fault).toHaveBeenCalledTimes(1);
+  });
+
   it("separa as partes da resposta MTOM sem estragar o binário", async () => {
     const r = await respostaMultipart();
     const partes = partesMultipart(new Uint8Array(await r.arrayBuffer()), r.headers.get("content-type")!);
