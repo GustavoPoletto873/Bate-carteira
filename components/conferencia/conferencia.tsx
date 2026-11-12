@@ -6,7 +6,8 @@ import { WordsPullUp } from "@/components/ui/prisma-hero";
 import { DRIVE_BASE_PADRAO } from "@/lib/lastro/drive-comum";
 import { conferirPastaBase, criarProvedorPasta } from "@/lib/lastro/drive-pasta";
 import { escolherPasta, lembrada, reabrir, suportaAcessoDireto, type HandlePasta } from "@/lib/lastro/fontes";
-import type { PdfJs } from "@/lib/lastro/extratores";
+import { periodoDoCdi, type PontoCdi } from "@/lib/lastro/indexadores";
+import { carregarPdfjs, OPCOES_PDF } from "@/lib/lastro/pdfjs-navegador";
 import { gerarExcel, lerDocumentos, montarResultado, type ResultadoCompleto } from "@/lib/lastro/pipeline";
 import { lerCarteira } from "@/lib/lastro/planilhas";
 import { provedorLocal, salvarChave, servidor, type StatusServidor } from "@/lib/lastro/servidor-cliente";
@@ -17,16 +18,6 @@ import { FontesManuais } from "./fontes-manuais";
 import { Inventario, Resultado } from "./resultado";
 import type { Preparo } from "./tipos";
 
-const OPCOES_PDF = {
-  cMapUrl: "/pdfjs/cmaps/", cMapPacked: true, standardFontDataUrl: "/pdfjs/standard_fonts/", wasmUrl: "/pdfjs/wasm/",
-  verbosity: 0,
-};
-
-async function carregarPdfjs(): Promise<PdfJs> {
-  const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc = "/pdfjs/pdf.worker.min.mjs";
-  return pdfjs as unknown as PdfJs;
-}
 
 type EstadoServidor = { carregando: true } | { carregando: false; status: StatusServidor | null; erro: string };
 
@@ -138,10 +129,23 @@ export function Conferencia() {
       const { docs, ignorados } = await lerDocumentos(arquivos, pdfjs, OPCOES_PDF, (atual, total, texto) =>
         setProgresso({ atual, total, texto }));
 
+      // títulos com taxa (% do CDI + spread, prefixado): o CDI do período vem do Banco Central
+      const avisos: string[] = [];
+      let cdi: PontoCdi[] | undefined;
+      const periodo = periodoDoCdi(posicoes, docs, p.dataBase);
+      if (periodo) {
+        setProgresso({ atual: 0, total: 0, texto: "Buscando o CDI no Banco Central" });
+        try {
+          cdi = (await servidor.cdi(periodo.de, periodo.ate)).pontos;
+        } catch (e) {
+          avisos.push(`Não consegui buscar o CDI no Banco Central (${mensagem(e)}): os valores calculados pela taxa ficaram de fora.`);
+        }
+      }
+
       setProgresso({ atual: 1, total: 1, texto: "Conferindo" });
       const r = montarResultado({
         workpaper: p.workpaper, posicoes, docs, ignorados, dataBase: p.dataBase, fonteBritech: p.carteira.rotulo,
-        pastaLastro: p.lastro.nome,
+        pastaLastro: p.lastro.nome, avisos, cdi, arquivos,
       });
       setResultado(r);
       requestAnimationFrame(() => document.getElementById("resultado")?.scrollIntoView({ behavior: "smooth" }));
@@ -152,18 +156,18 @@ export function Conferencia() {
     }
   }
 
-  async function baixarExcel() {
-    if (!resultado) return;
+  /** Excel do resultado mostrado na tela (já com os vínculos feitos à mão no Bater PDF). */
+  async function baixarExcel(alvo: ResultadoCompleto) {
     setBaixando(true);
     try {
-      const buffer = await gerarExcel(resultado);
+      const buffer = await gerarExcel(alvo);
       const url = URL.createObjectURL(new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       }));
       const a = document.createElement("a");
       a.href = url;
-      const data = resultado.resumo.dataBase.split("/").reverse().join("");
-      a.download = `Bate_Carteira_Lastro_${resultado.resumo.cnpj || "fundo"}_${data}.xlsx`;
+      const data = alvo.resumo.dataBase.split("/").reverse().join("");
+      a.download = `Bate_Carteira_Lastro_${alvo.resumo.cnpj || "fundo"}_${data}.xlsx`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) {

@@ -11,7 +11,7 @@ let id = 0;
 function linha(situacao: Situacao, campos: Partial<Record<ChaveCampo, Partial<Campo>>> = {}, extra: Partial<LinhaResultado> = {}): LinhaResultado {
   return {
     id: ++id, ativo: `CCB ${id}`, emissor: "EMISSOR X", cedente: "", codigo: "", valorAplicado: "", dataAquisicao: "", noWp: false, wpLinha: null,
-    situacao, docsDiretos: 0, docsMesmaOperacao: 0, evidencias: [],
+    situacao, docsDiretos: 0, docsMesmaOperacao: 0, evidencias: [], comparacoes: [],
     campos: {
       valor: campo(campos.valor), emissao: campo(campos.emissao), vencimento: campo(campos.vencimento), emissor: campo(campos.emissor),
     },

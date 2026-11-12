@@ -30,6 +30,8 @@ export function pendenciasDaLinha(l: LinhaResultado, campos: [ChaveCampo, string
       lista.push({ campo: rotulo, texto: `Britech ${c.britech || "—"}${docs}${c.nota ? ` (${c.nota})` : ""}`, grave: true });
     } else if (c.status === "Verificar" || c.status === "Não localizado") {
       lista.push({ campo: rotulo, texto: c.nota || "não encontrado nos documentos", grave: false });
+    } else if (c.status === "Provável") {
+      lista.push({ campo: rotulo, texto: c.nota || "deduzido pela comparação com o documento", grave: false });
     }
     if (l.noWp && c.wpStatus === "Diverge") {
       lista.push({ campo: rotulo, texto: `Britech ${c.britech || "—"} × WP_Termo ${c.wp || "em branco"}`, grave: true });
@@ -45,6 +47,8 @@ const ATENCAO: Situacao[] = ["Divergente", "Só no WP", "Verificar"];
 
 export interface ResumoTela {
   atencao: LinhaResultado[];
+  /** conferem por aproximação (outro campo, sem rótulo, diferença pequena ou cálculo da taxa) */
+  provaveis: LinhaResultado[];
   ok: LinhaResultado[];
   semDocumentos: LinhaResultado[];
   /** frase de abertura, ex.: "3 de 13 títulos precisam de atenção" */
@@ -59,6 +63,7 @@ export function resumirParaTela(linhas: LinhaResultado[], tipo: TipoCarteira = "
     .filter((l) => ATENCAO.includes(l.situacao))
     .sort((a, b) => ATENCAO.indexOf(a.situacao) - ATENCAO.indexOf(b.situacao));
   const ok = linhas.filter((l) => l.situacao === "OK");
+  const provaveis = linhas.filter((l) => l.situacao === "Provável");
   const semDocumentos = linhas.filter((l) => l.situacao === "Sem documentos");
   const total = linhas.length;
   const titulo = !total
@@ -68,8 +73,8 @@ export function resumirParaTela(linhas: LinhaResultado[], tipo: TipoCarteira = "
       : semDocumentos.length === total
         ? `Nenhum ${tipo === "recebiveis" ? "recebível" : "título"} foi achado nos documentos da pasta`
         : "Nada diverge";
-  const partes = (["Divergente", "Só no WP", "Verificar", "Sem documentos", "OK"] as Situacao[])
+  const partes = (["Divergente", "Só no WP", "Verificar", "Provável", "Sem documentos", "OK"] as Situacao[])
     .map((situacao) => ({ situacao, n: linhas.filter((l) => l.situacao === situacao).length }))
     .filter((p) => p.n > 0);
-  return { atencao, ok, semDocumentos, titulo, partes };
+  return { atencao, provaveis, ok, semDocumentos, titulo, partes };
 }

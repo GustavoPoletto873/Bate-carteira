@@ -7,6 +7,7 @@ const ESTILOS: Record<string, string> = {
   Divergente: "text-erro bg-erro/12 ring-erro/25",
   "Só no WP": "text-erro bg-erro/12 ring-erro/25",
   Verificar: "text-aviso bg-aviso/12 ring-aviso/25",
+  Provável: "text-sky-300 bg-sky-400/12 ring-sky-400/25",
 };
 const NEUTRO = "text-creme/55 bg-creme/6 ring-creme/10";
 

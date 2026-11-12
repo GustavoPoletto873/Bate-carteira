@@ -1,5 +1,6 @@
 /** Junta as etapas: documentos da pasta → análise → conferência → resultado para a tela e o Excel. */
 import { camposDe, conferir, recortarPelaWp, TOLERANCIA_CENTAVOS, unicos, type ResultadoConferencia, type Situacao } from "./conciliacao";
+import type { PontoCdi } from "./indexadores";
 import { analisar, documentoComErro, type Documento } from "./documentos";
 import { classificar, extrairTexto, type PdfJs } from "./extratores";
 import type { Posicao, Workpaper } from "./planilhas";
@@ -36,6 +37,7 @@ export async function lerDocumentos(
         const t = await extrairTexto(arq.nome, await arq.ler(), pdfjs, opcoesPdf);
         docs[i] = analisar(arq.nome, t.texto, {
           caminho: arq.caminho, tipo: t.tipo, paginasLidas: t.paginasLidas, paginasTotal: t.paginasTotal, aviso: t.aviso,
+          paginas: t.paginas,
         });
       } catch (e) {
         docs[i] = documentoComErro(arq.nome, arq.caminho, `não foi possível ler: ${String((e as Error)?.message ?? e).slice(0, 150)}`);
@@ -68,6 +70,10 @@ export interface Resumo {
 
 export interface ResultadoCompleto extends ResultadoConferencia {
   resumo: Resumo;
+  /** documentos lidos (texto, valores e datas com rótulo e página) — para a busca nos PDFs */
+  docs: Documento[];
+  /** abre de novo um arquivo da pasta de lastro (para o visualizador); ausente nos testes */
+  abrir?: (caminho: string) => Promise<Uint8Array>;
   ignorados: { nome: string; motivo: string }[];
   avisos: string[];
 }
@@ -75,15 +81,27 @@ export interface ResultadoCompleto extends ResultadoConferencia {
 export function montarResultado(args: {
   workpaper: Workpaper; posicoes: Posicao[]; docs: Documento[]; ignorados: { nome: string; motivo: string }[];
   dataBase: string | null; fonteBritech: string; pastaLastro: string; avisos?: string[];
+  /** série do CDI para os títulos com taxa (Nota Comercial, CCB, CRI…) */
+  cdi?: PontoCdi[];
+  /** arquivos da pasta de lastro, para o visualizador abrir o documento */
+  arquivos?: ArquivoEntrada[];
 }): ResultadoCompleto {
   const { workpaper, docs, ignorados } = args;
   const { posicoes, aviso } = recortarPelaWp(args.posicoes, workpaper.linhas);
-  const conferencia = conferir(posicoes, workpaper.linhas, docs, workpaper.cnpj);
+  const conferencia = conferir(posicoes, workpaper.linhas, docs, workpaper.cnpj, TOLERANCIA_CENTAVOS, {
+    dataBase: args.dataBase, cdi: args.cdi,
+  });
+  const porCaminho = new Map((args.arquivos ?? []).map((a) => [a.caminho, a.ler]));
   const semTexto = docs.filter((d) => d.erro).length;
   const avisos = [...(args.avisos ?? []), ...(aviso ? [aviso] : [])];
   if (!docs.length) avisos.push("A pasta de lastro e termo não tem documentos legíveis (PDF, HTML, DOCX ou TXT).");
   return {
-    ...conferencia, ignorados, avisos,
+    ...conferencia, ignorados, avisos, docs,
+    abrir: porCaminho.size ? async (caminho) => {
+      const ler = porCaminho.get(caminho);
+      if (!ler) throw new Error(`Arquivo não encontrado na pasta: ${caminho}`);
+      return ler();
+    } : undefined,
     resumo: {
       fundo: workpaper.fundo, cnpj: workpaper.cnpj, dataBase: fmtData(args.dataBase), fonteBritech: args.fonteBritech,
       workpaper: workpaper.arquivo, pastaLastro: args.pastaLastro, posicoesBritech: posicoes.length,
@@ -99,6 +117,8 @@ export function montarResultado(args: {
 
 const CORES: Record<string, string> = {
   Confere: "FFC6EFCE", OK: "FFC6EFCE", Diverge: "FFFFC7CE", Divergente: "FFFFC7CE", "Só no WP": "FFFFC7CE",
+  Provável: "FFDDEBF7", igual: "FFC6EFCE", "campo diferente": "FFDDEBF7", "sem rótulo": "FFDDEBF7", aproximado: "FFFFEB9C",
+  calculado: "FFDDEBF7",
   Verificar: "FFFFEB9C", "Não localizado": "FFEDEDED", "Sem documentos": "FFEDEDED",
 };
 
@@ -162,6 +182,14 @@ export async function gerarExcel(r: ResultadoCompleto): Promise<ArrayBuffer> {
     r.linhas.flatMap((ln) => ln.evidencias.map((e) => [ln.ativo, ln.valorAplicado, rotulos[e.campo], e.valor,
       e.confere ? "Confere" : "Diverge", e.nivel, e.documento, e.trecho])),
     { Ativo: 45, Recebível: 30, Documento: 55, "Trecho do documento": 110 }, [`x ${F}`]);
+
+  aba("Comparações", ["Situação", rec ? "Recebível" : "Ativo", "Campo", "Origem", "Coluna da carteira", "Valor na carteira",
+    "Relação", "Documento", "Página", "Rótulo no documento", "Valor no documento", "Detalhe", "Trecho do documento"],
+  r.linhas.flatMap((ln) => ln.comparacoes.map((c) => [ln.situacao, ln.ativo, c.tipo === "valor" ? V : c.campo === "aquisicao" ? "Dt. Aquisição" : rotulos[c.campo],
+    c.carteira.origem, c.carteira.coluna, c.carteira.valor, c.relacao, c.documento.arquivo, c.documento.pagina || "",
+    c.documento.rotulo || "(sem rótulo)", c.documento.valor, c.detalhe, c.documento.trecho])),
+  { Ativo: 45, Recebível: 30, "Coluna da carteira": 24, Documento: 50, "Rótulo no documento": 30, Detalhe: 80, "Trecho do documento": 100 },
+  ["Situação", "Relação"]);
 
   aba("Documentos", ["Arquivo", "Tipo", "Páginas lidas", "Cita o CNPJ do fundo", "Ligado a", "Observação"], [
     ...r.documentos.map((d) => [d.caminho, d.tipo, d.paginas, d.citaCnpjFundo ? "Sim" : "Não", d.vinculos.join("\n"), d.observacao]),

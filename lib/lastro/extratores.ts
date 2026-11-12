@@ -18,6 +18,8 @@ export interface TextoExtraido {
   paginasTotal: number;
   tipo: string;
   aviso: string;
+  /** onde começa cada página no texto (PDF); ausente nos outros formatos (uma página só) */
+  paginas?: number[];
 }
 
 /** Tipo mínimo do pdf.js que usamos (evita acoplar aos tipos internos da biblioteca). */
@@ -122,7 +124,13 @@ export async function textoPdf(bytes: Uint8Array, pdfjs: PdfJs, opcoes: Record<s
       }
     }
     if (!aviso && total > lidas && lidas === MAX_PAGINAS_PDF) aviso = `lidas as ${lidas} primeiras páginas de ${total}`;
-    return { texto: partes.join("\n"), paginasLidas: lidas, paginasTotal: total, aviso };
+    const paginas: number[] = [];
+    let pos = 0;
+    for (const p of partes) {
+      paginas.push(pos);
+      pos += p.length + 1;
+    }
+    return { texto: partes.join("\n"), paginasLidas: lidas, paginasTotal: total, aviso, paginas };
   } finally {
     await tarefa.destroy(); // no pdf.js 6 quem libera o documento é a tarefa de carregamento
   }

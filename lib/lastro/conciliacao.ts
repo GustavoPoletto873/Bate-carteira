@@ -7,14 +7,17 @@
  *   (ex.: código CETIP) ou o nome do emissor + o mesmo número de emissão;
  * - mesmo emissor: só o nome do emissor (usado quando os níveis acima não trazem a informação).
  */
+import { compararPosicao, descrever, podar, type Comparacao } from "./comparacao";
 import { achar, contem, temTexto, trecho, type Achado, type Documento } from "./documentos";
+import { CurvaCdi, deducoesPorTaxa, type PontoCdi } from "./indexadores";
 import type { LinhaWP, Posicao } from "./planilhas";
 import { codigoBritech, fmtData, fmtValor, nomeEssencial, numeroEmissaoBritech, palavras, soDigitos } from "./textos";
 
 export const TOLERANCIA_CENTAVOS = 1;
 
-export type StatusCampo = "Confere" | "Diverge" | "Verificar" | "Não localizado" | "—";
-export type Situacao = "OK" | "Divergente" | "Verificar" | "Sem documentos" | "Só no WP";
+/** "Provável": não bate campo a campo, mas a comparação deduz o valor/data (outro campo, sem rótulo, aproximado ou calculado). */
+export type StatusCampo = "Confere" | "Provável" | "Diverge" | "Verificar" | "Não localizado" | "—";
+export type Situacao = "OK" | "Provável" | "Divergente" | "Verificar" | "Sem documentos" | "Só no WP";
 export type Nivel = "direto" | "mesma operação" | "mesmo emissor";
 export type ChaveCampo = "valor" | "emissao" | "vencimento" | "emissor";
 
@@ -66,6 +69,10 @@ export interface LinhaResultado {
   docsDiretos: number;
   docsMesmaOperacao: number;
   evidencias: Evidencia[];
+  /** carteira × documentos, com a origem de cada valor/data (ver comparacao.ts) */
+  comparacoes: Comparacao[];
+  /** documento vinculado à mão no Bater PDF (a marca de quem confere vence a automática) */
+  manual?: string;
 }
 
 export interface ItemInventario {
@@ -408,18 +415,73 @@ export function recortarPelaWp(posicoes: Posicao[], linhasWp: LinhaWP[]): { posi
 
 // ------------------------------------------------------------------ conferência completa
 
-function situacaoDe(campos: Record<ChaveCampo, Campo>, noWp: boolean): Situacao {
+export function situacaoDe(campos: Record<ChaveCampo, Campo>, noWp: boolean): Situacao {
   const docs = Object.values(campos).map((c) => c.status);
   const wp = noWp ? Object.values(campos).map((c) => c.wpStatus).filter((s) => s !== "—") : [];
   if (docs.includes("Diverge") || wp.includes("Diverge")) return "Divergente";
   if (docs.every((s) => s === "Não localizado")) return "Sem documentos";
   if ([...docs, ...wp].some((s) => s === "Verificar" || s === "Não localizado")) return "Verificar";
+  if (docs.includes("Provável")) return "Provável";
   return "OK";
+}
+
+const juntar = (...partes: string[]) => partes.filter(Boolean).join("; ");
+
+/**
+ * Usa as comparações para deduzir o que a regra campo a campo não achou: valor/data da carteira que aparece no
+ * documento em outro campo, sem rótulo, aproximado ou pela conta da taxa vira "Provável" (com a origem na nota).
+ * Divergência explícita (o mesmo rótulo com outro valor) continua "Diverge" — a dedução só entra na nota.
+ */
+export function aplicarDeducoes(campos: Record<ChaveCampo, Campo>, comparacoes: Comparacao[]) {
+  const valor = campos.valor;
+  const deValor = comparacoes.filter((c) => c.campo === "valor");
+  if (valor.status === "Confere") {
+    const principal = deValor.find((c) => c.carteira.origem === "carteira" && (c.relacao === "igual" || c.relacao === "campo diferente"));
+    if (principal?.relacao === "campo diferente") {
+      valor.nota = juntar(valor.nota, `no documento o valor aparece como "${principal.documento.rotulo}"`);
+    }
+  } else if (valor.status !== "—") {
+    const deducao = deValor.find((c) => c.relacao === "calculado")
+      ?? deValor.find((c) => c.relacao !== "aproximado") ?? deValor.find((c) => c.relacao === "aproximado");
+    if (deducao && valor.status === "Diverge") {
+      valor.nota = juntar(valor.nota, `possível explicação: ${descrever(deducao)}`);
+    } else if (deducao) {
+      valor.status = "Provável";
+      valor.nota = `provável: ${descrever(deducao)}`;
+      valor.documentos = deducao.documento.valor;
+      valor.fontes = [...new Set([...valor.fontes, deducao.documento.arquivo])];
+    }
+  }
+  for (const k of ["emissao", "vencimento"] as const) {
+    const c = campos[k];
+    if (c.status === "Confere" || c.status === "—") continue;
+    const exata = comparacoes.find((x) => x.campo === k && x.carteira.origem === "carteira" && x.relacao !== "aproximado" && x.relacao !== "calculado");
+    if (!exata) continue;
+    const onde = `${exata.documento.arquivo} p. ${exata.documento.pagina} ${exata.documento.rotulo ? `como "${exata.documento.rotulo}"` : "sem rótulo"}`;
+    // documentos que discordam entre si (ou rótulo certo com outra data) continuam para conferir: a dedução vai na nota
+    if (c.status === "Diverge" || /nao concordam|não concordam/.test(c.nota)) {
+      c.nota = juntar(c.nota, `a data da carteira (${exata.carteira.valor}) aparece em ${onde}`);
+    } else {
+      c.status = "Provável";
+      c.nota = `provável: a data da carteira (${exata.carteira.valor}) aparece em ${onde}`;
+      c.documentos = exata.documento.valor;
+      c.fontes = [...new Set([...c.fontes, exata.documento.arquivo])];
+    }
+  }
+}
+
+export interface OpcoesConferencia {
+  /** data-base da conferência (para o valor presente calculado) */
+  dataBase?: string | null;
+  /** série diária do CDI (Banco Central) para os títulos com taxa */
+  cdi?: PontoCdi[];
 }
 
 export function conferir(
   posicoes: Posicao[], linhasWp: LinhaWP[], docs: Documento[], cnpjFundo = "", tolerancia = TOLERANCIA_CENTAVOS,
+  opcoes: OpcoesConferencia = {},
 ): ResultadoConferencia {
+  const curva = opcoes.cdi?.length ? new CurvaCdi(opcoes.cdi) : null;
   const { casados, sobrando } = casarWp(posicoes, linhasWp, tolerancia);
   const tipo: TipoCarteira = posicoes.some((p) => p.tipo === "recebivel") ? "recebiveis" : "titulos";
   const fonte = tipo === "recebiveis" ? "a carteira" : "a Britech";
@@ -437,6 +499,14 @@ export function conferir(
     };
     const w = casados.get(i);
     if (w) compararWp(campos, pos, w, tolerancia);
+    // comparação com origem: datas só com documentos ligados ao título; com documentos só do mesmo emissor, só valores
+    const ligados = [...v.direto, ...v["mesma operação"]];
+    const comparacoes = podar([
+      ...(ligados.length ? compararPosicao(pos, ligados, w) : compararPosicao(pos, v["mesmo emissor"].slice(0, 4), w).filter((c) => c.tipo === "valor")),
+      // a conta só bate com principal, taxa e datas certos: vale até com documento que só cita o emissor
+      ...deducoesPorTaxa(pos, ligados.length ? ligados : v["mesmo emissor"].slice(0, 6), w, curva, opcoes.dataBase ?? null),
+    ]);
+    aplicarDeducoes(campos, comparacoes);
     const rotulo = `${pos.ativo || pos.emissor} — R$ ${fmtValor(pos.valorAplicado)}`;
     for (const nivel of ["direto", "mesma operação"] as const) {
       for (const d of v[nivel]) vinculosPorDoc.set(d.id, [...(vinculosPorDoc.get(d.id) ?? []), `${rotulo} (${nivel})`]);
@@ -445,7 +515,7 @@ export function conferir(
       id: i + 1, ativo: pos.ativo, emissor: pos.emissor, cedente: pos.cedente, codigo: pos.codigo, valorAplicado: fmtValor(pos.valorAplicado),
       dataAquisicao: fmtData(pos.dataAquisicao), noWp: !!w, wpLinha: w?.linhaExcel ?? null,
       situacao: situacaoDe(campos, !!w), campos, docsDiretos: v.direto.length,
-      docsMesmaOperacao: v["mesma operação"].length, evidencias: evid,
+      docsMesmaOperacao: v["mesma operação"].length, evidencias: evid, comparacoes,
     });
   });
 
@@ -461,7 +531,7 @@ export function conferir(
       emissor: tipo === "recebiveis" ? w.nomeSacado : w.nomeCedente || w.nomeSacado, cedente: tipo === "recebiveis" ? w.nomeCedente : "",
       codigo: w.numeroDoc,
       valorAplicado: "", dataAquisicao: fmtData(w.dataAquisicao), noWp: true, wpLinha: w.linhaExcel, situacao: "Só no WP",
-      campos, docsDiretos: 0, docsMesmaOperacao: 0, evidencias: [],
+      campos, docsDiretos: 0, docsMesmaOperacao: 0, evidencias: [], comparacoes: [],
     });
   }
 

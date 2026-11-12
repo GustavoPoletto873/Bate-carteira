@@ -1,15 +1,65 @@
 "use client";
 
-import { ChevronDown, Download, FileText } from "lucide-react";
-import { Fragment, useMemo, useState } from "react";
+import { ChevronDown, Download, FileSearch, FileText, Link2 } from "lucide-react";
+import { Fragment, useCallback, useMemo, useState } from "react";
+import type { Comparacao, Relacao } from "@/lib/lastro/comparacao";
 import { camposDe, type Campo, type ChaveCampo, type LinhaResultado, type Situacao } from "@/lib/lastro/conciliacao";
 import type { ResultadoCompleto } from "@/lib/lastro/pipeline";
+import { aplicarVinculos, type Vinculo } from "@/lib/lastro/marcacoes";
 import { pendenciasDaLinha, resumirParaTela } from "@/lib/lastro/resumo";
 import { cn } from "@/lib/utils";
+import { BaterPdf } from "./bater-pdf";
 import { Alternador } from "./comum";
 import { corDoStatus, Status } from "./status";
 
-const ORDEM: Situacao[] = ["Divergente", "Só no WP", "Verificar", "OK", "Sem documentos"];
+const ORDEM: Situacao[] = ["Divergente", "Só no WP", "Verificar", "Provável", "OK", "Sem documentos"];
+
+const COR_RELACAO: Record<Relacao, string> = {
+  igual: "text-ok bg-ok/12 ring-ok/25",
+  "campo diferente": "text-sky-300 bg-sky-400/12 ring-sky-400/25",
+  "sem rótulo": "text-sky-300 bg-sky-400/12 ring-sky-400/25",
+  calculado: "text-sky-300 bg-sky-400/12 ring-sky-400/25",
+  aproximado: "text-aviso bg-aviso/12 ring-aviso/25",
+};
+
+/** Carteira × documento: cada valor/data com a coluna de onde veio e o rótulo/página onde está no documento. */
+function TabelaComparacoes({ comparacoes, campos }: { comparacoes: Comparacao[]; campos: Campos }) {
+  const rotulos = { ...Object.fromEntries(campos), aquisicao: "Dt. Aquisição" } as Record<string, string>;
+  return (
+    <div className="overflow-x-auto rounded-xl ring-1 ring-creme/10">
+      <table className="w-full text-xs">
+        <thead className="bg-creme/[0.04] text-left text-creme/50">
+          <tr>
+            {["Campo", "Na carteira (coluna)", "Relação", "No documento (rótulo · página)", "Detalhe"].map((t) => (
+              <th key={t} className="px-3 py-2 font-medium">{t}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {comparacoes.map((c, i) => (
+            <tr key={i} className="border-t border-creme/[0.06] align-top">
+              <td className="whitespace-nowrap px-3 py-2 text-creme/70">{c.tipo === "valor" ? rotulos.valor : rotulos[c.campo]}</td>
+              <td className="px-3 py-2">
+                <div className="tabular-nums text-creme">{c.carteira.valor}</div>
+                <div className="text-creme/45">{c.carteira.coluna} · {c.carteira.origem}</div>
+              </td>
+              <td className="px-3 py-2">
+                <span className={cn("inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", COR_RELACAO[c.relacao])}>{c.relacao}</span>
+              </td>
+              <td className="max-w-[22rem] px-3 py-2">
+                <div className="tabular-nums text-creme">{c.documento.valor}</div>
+                <div className="break-words text-creme/45">
+                  {c.documento.rotulo ? `"${c.documento.rotulo}"` : "sem rótulo"} · {c.documento.arquivo}{c.documento.pagina ? ` p. ${c.documento.pagina}` : ""}
+                </div>
+              </td>
+              <td className="min-w-[18rem] px-3 py-2 leading-relaxed text-creme/60">{c.detalhe || c.documento.trecho}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 type Campos = [ChaveCampo, string][];
 
 function CelulaCampo({ c }: { c: Campo }) {
@@ -50,6 +100,12 @@ function Detalhe({ l, campos, semNotas = false }: { l: LinhaResultado; campos: C
           {notas.map((n) => <li key={n}>• {n}</li>)}
         </ul>
       )}
+      {l.comparacoes.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-creme/45">Comparação carteira × documento</p>
+          <TabelaComparacoes comparacoes={l.comparacoes} campos={campos} />
+        </div>
+      )}
       {l.evidencias.length === 0 ? (
         <p className="text-sm text-creme/50">Nenhum documento da pasta foi ligado a este título.</p>
       ) : (
@@ -81,14 +137,13 @@ function Detalhe({ l, campos, semNotas = false }: { l: LinhaResultado; campos: C
   );
 }
 
-function TabelaCompleta({ resultado }: { resultado: ResultadoCompleto }) {
+function TabelaCompleta({ resultado, onBaterPdf }: { resultado: ResultadoCompleto; onBaterPdf: (l: LinhaResultado) => void }) {
   const [filtro, setFiltro] = useState<Situacao | "">("");
   const [soWp, setSoWp] = useState(false);
   const [abertas, setAbertas] = useState<Set<number>>(new Set());
   const r = resultado;
   const rec = r.tipo === "recebiveis";
   const campos = camposDe(r.tipo);
-  const s = r.resumo;
 
   const linhas = useMemo(
     () => r.linhas.filter((l) => (!filtro || l.situacao === filtro) && (!soWp || l.noWp)),
@@ -104,7 +159,7 @@ function TabelaCompleta({ resultado }: { resultado: ResultadoCompleto }) {
 
   const tiles: { chave: Situacao | ""; rotulo: string; n: number }[] = [
     { chave: "", rotulo: "Todos", n: r.linhas.length },
-    ...ORDEM.filter((k) => s.contagem[k]).map((k) => ({ chave: k, rotulo: k, n: s.contagem[k] ?? 0 })),
+    ...ORDEM.map((k) => ({ chave: k, rotulo: k, n: r.linhas.filter((l) => l.situacao === k).length })).filter((t) => t.n > 0),
   ];
 
   return (
@@ -181,7 +236,14 @@ function TabelaCompleta({ resultado }: { resultado: ResultadoCompleto }) {
                   </tr>
                   {aberta && (
                     <tr className="bg-creme/[0.02]">
-                      <td colSpan={8}><Detalhe l={l} campos={campos} /></td>
+                      <td colSpan={8}>
+                        <div className="flex justify-end px-3 pt-3">
+                          <button type="button" onClick={() => onBaterPdf(l)} className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-creme/75 ring-1 ring-creme/20 hover:bg-creme/[0.06]">
+                            <FileSearch className="size-3.5" /> Bater PDF
+                          </button>
+                        </div>
+                        <Detalhe l={l} campos={campos} />
+                      </td>
                     </tr>
                   )}
                 </Fragment>
@@ -199,11 +261,12 @@ const ROTULO_PARTE: Record<Situacao, (n: number) => string> = {
   "Só no WP": () => "só na WP_Termo",
   Verificar: () => "para verificar",
   "Sem documentos": () => "sem documentos",
+  Provável: () => "por aproximação",
   OK: (n) => (n === 1 ? "confere" : "conferem"),
 };
 
 /** Um título que precisa de atenção: o que está errado, uma linha por problema; as evidências abrem embaixo. */
-function CartaoAtencao({ l, campos }: { l: LinhaResultado; campos: Campos }) {
+function CartaoAtencao({ l, campos, onBaterPdf }: { l: LinhaResultado; campos: Campos; onBaterPdf: (l: LinhaResultado) => void }) {
   const [aberto, setAberto] = useState(false);
   const pendencias = pendenciasDaLinha(l, campos);
   const rec = campos[3][1] === "Sacado";
@@ -221,6 +284,9 @@ function CartaoAtencao({ l, campos }: { l: LinhaResultado; campos: Campos }) {
           <div>
             <p className="font-medium text-creme">{l.ativo || l.emissor || "—"}</p>
             {sub && <p className="mt-0.5 text-xs text-creme/50">{sub}</p>}
+            {l.manual && (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-sky-300"><Link2 className="size-3.5" /> vinculado à mão: {l.manual}</p>
+            )}
           </div>
           <ul className="space-y-1 text-sm">
             {pendencias.map((p, i) => (
@@ -231,16 +297,25 @@ function CartaoAtencao({ l, campos }: { l: LinhaResultado; campos: Campos }) {
             ))}
           </ul>
         </div>
-        {l.evidencias.length > 0 && (
+        <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
           <button
             type="button"
-            onClick={() => setAberto((a) => !a)}
-            className="inline-flex shrink-0 items-center gap-1.5 self-start text-sm text-creme/60 underline-offset-4 hover:text-creme hover:underline"
+            onClick={() => onBaterPdf(l)}
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-creme/80 ring-1 ring-creme/20 hover:bg-creme/[0.06]"
           >
-            {aberto ? "Esconder evidências" : `Ver evidências (${l.evidencias.length})`}
-            <ChevronDown className={cn("size-4 transition-transform", aberto && "rotate-180")} />
+            <FileSearch className="size-4" /> Bater PDF
           </button>
-        )}
+          {(l.evidencias.length > 0 || l.comparacoes.length > 0) && (
+            <button
+              type="button"
+              onClick={() => setAberto((a) => !a)}
+              className="inline-flex items-center gap-1.5 text-sm text-creme/60 underline-offset-4 hover:text-creme hover:underline"
+            >
+              {aberto ? "Esconder" : `Comparações (${l.comparacoes.length}) e evidências (${l.evidencias.length})`}
+              <ChevronDown className={cn("size-4 transition-transform", aberto && "rotate-180")} />
+            </button>
+          )}
+        </div>
       </div>
       {aberto && <div className="border-t border-border pt-4"><Detalhe l={l} campos={campos} semNotas /></div>}
     </li>
@@ -284,14 +359,21 @@ function GrupoCompacto({ titulo, dica, linhas }: { titulo: string; dica?: string
 }
 
 export function Resultado({ resultado, onBaixar, baixando }: {
-  resultado: ResultadoCompleto; onBaixar: () => void; baixando: boolean;
+  resultado: ResultadoCompleto; onBaixar: (r: ResultadoCompleto) => void; baixando: boolean;
 }) {
   const [vista, setVista] = useState<"resumo" | "tabela">("resumo");
-  const r = resultado;
+  const [vinculos, setVinculos] = useState<Map<number, Vinculo>>(() => new Map());
+  const [bater, setBater] = useState<{ linhaId: number | null; termo: string } | null>(null);
+  // os vínculos feitos à mão no Bater PDF valem mais que a conferência automática (tela e Excel)
+  const r = useMemo(() => ({ ...resultado, linhas: aplicarVinculos(resultado.linhas, vinculos) }), [resultado, vinculos]);
   const s = r.resumo;
   const tela = useMemo(() => resumirParaTela(r.linhas, r.tipo), [r.linhas, r.tipo]);
   const rec = r.tipo === "recebiveis";
   const campos = camposDe(r.tipo);
+  const termoDe = (l: LinhaResultado) =>
+    (rec && l.codigo.length >= 3 ? l.codigo : "") || l.campos.valor.britech.split(" ")[0] || l.emissor.split(" ").slice(0, 2).join(" ");
+  const abrirBater = (l: LinhaResultado | null) => setBater({ linhaId: l?.id ?? null, termo: l ? termoDe(l) : "" });
+  const fecharBater = useCallback(() => setBater(null), []);
 
   return (
     <div className="space-y-6">
@@ -309,7 +391,7 @@ export function Resultado({ resultado, onBaixar, baixando }: {
         </div>
         <button
           type="button"
-          onClick={onBaixar}
+          onClick={() => onBaixar(r)}
           disabled={baixando}
           className="group inline-flex shrink-0 items-center gap-2 self-start rounded-full bg-primary py-1 pl-5 pr-1 text-sm font-medium text-black transition-all hover:gap-3 disabled:opacity-60 md:self-auto"
         >
@@ -332,6 +414,11 @@ export function Resultado({ resultado, onBaixar, baixando }: {
             opcoes={[{ valor: "resumo", rotulo: "Resumo" }, { valor: "tabela", rotulo: "Tabela completa" }]}
           />
         </div>
+        {r.docs.length > 0 && (
+          <button type="button" onClick={() => abrirBater(null)} className="inline-flex items-center gap-2 self-start rounded-full px-4 py-2 text-sm text-creme/80 ring-1 ring-creme/20 hover:bg-creme/[0.06] sm:self-auto">
+            <FileSearch className="size-4" /> Buscar nos PDFs
+          </button>
+        )}
         <p className="text-xs text-creme/45">
           {s.posicoesBritech} {rec ? "recebível(is) na carteira" : "título(s) na Britech"} · {s.linhasWpTermo} na WP_Termo · {s.documentosLidos} documento(s) lido(s)
           {s.documentosSemTexto ? `, ${s.documentosSemTexto} sem texto` : ""}
@@ -343,12 +430,32 @@ export function Resultado({ resultado, onBaixar, baixando }: {
         <div className="space-y-4">
           {tela.atencao.length > 0 ? (
             <ul className="space-y-3">
-              {tela.atencao.map((l) => <CartaoAtencao key={l.id} l={l} campos={campos} />)}
+              {tela.atencao.map((l) => <CartaoAtencao key={l.id} l={l} campos={campos} onBaterPdf={abrirBater} />)}
             </ul>
           ) : (
             <p className="rounded-2xl border border-ok/25 bg-ok/[0.05] px-5 py-4 text-sm text-creme/75">
               Nenhum título diverge da Britech, dos documentos ou da WP_Termo.
             </p>
+          )}
+          {tela.provaveis.length > 0 && (
+            <details className="group rounded-2xl border border-sky-400/25 bg-card">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+                <span className="flex items-center gap-3 text-creme">
+                  <Status status="Provável" />
+                  Conferem por aproximação <span className="tabular-nums text-creme/50">({tela.provaveis.length})</span>
+                </span>
+                <ChevronDown className="size-4 text-creme/50 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="space-y-3 border-t border-border p-3">
+                <p className="px-2 text-xs text-creme/50">
+                  Não bateram campo a campo, mas a comparação deduz o valor ou a data: aparece em outro campo do documento, sem rótulo,
+                  com pequena diferença ou pela conta da taxa. Veja de onde veio cada lado em &quot;Comparações&quot;.
+                </p>
+                <ul className="space-y-3">
+                  {tela.provaveis.map((l) => <CartaoAtencao key={l.id} l={l} campos={campos} onBaterPdf={abrirBater} />)}
+                </ul>
+              </div>
+            </details>
           )}
           <GrupoCompacto
             titulo="Sem documentos na pasta"
@@ -361,7 +468,21 @@ export function Resultado({ resultado, onBaixar, baixando }: {
           <p className="break-all text-xs text-creme/40">Carteira: {s.fonteBritech}</p>
         </div>
       ) : (
-        <TabelaCompleta resultado={r} />
+        <TabelaCompleta resultado={r} onBaterPdf={abrirBater} />
+      )}
+
+      {bater && (
+        <BaterPdf
+          resultado={r}
+          linha={bater.linhaId !== null ? r.linhas.find((x) => x.id === bater.linhaId) ?? null : null}
+          campos={campos}
+          termoInicial={bater.termo}
+          onVincular={(id, v) => {
+            setVinculos((m) => new Map(m).set(id, v));
+            setBater(null);
+          }}
+          onFechar={fecharBater}
+        />
       )}
     </div>
   );
