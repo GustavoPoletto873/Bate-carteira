@@ -8,6 +8,7 @@ import type { ResultadoCompleto } from "@/lib/lastro/pipeline";
 import { aplicarVinculos, type Vinculo } from "@/lib/lastro/marcacoes";
 import { pendentes } from "@/lib/lastro/pre-classificacao";
 import { aplicarAprovacoes, pontosDaLinha, resumirParaTela } from "@/lib/lastro/resumo";
+import { detalhesPorCampo, documentosDoTitulo, type DetalheCampo } from "@/lib/lastro/detalhe";
 import { cn } from "@/lib/utils";
 import { BaterPdf } from "./bater-pdf";
 import { ConferenciaPreClassificacao } from "./pre-classificacao";
@@ -92,54 +93,149 @@ function CelulaWp({ l }: { l: LinhaResultado }) {
   );
 }
 
-function Detalhe({ l, campos }: { l: LinhaResultado; campos: Campos }) {
-  const rotulos = Object.fromEntries(campos) as Record<string, string>;
-  const notas = campos.filter(([k]) => l.campos[k].nota).map(([k, rot]) => `${rot}: ${l.campos[k].nota}`);
+/** Abrir o Bater PDF já no documento e na página da evidência, procurando o valor. */
+export interface AlvoPdf { termo: string; arquivo?: string; pagina?: number }
+type AbrirPdf = (l: LinhaResultado, alvo?: AlvoPdf) => void;
+
+const COR_STATUS_CAMPO: Record<string, { ponto: string; texto: string }> = {
+  Confere: { ponto: "bg-ok", texto: "text-ok" },
+  Provável: { ponto: "bg-sky-400", texto: "text-sky-300" },
+  Diverge: { ponto: "bg-erro", texto: "text-erro" },
+  Verificar: { ponto: "bg-aviso", texto: "text-aviso" },
+  "Não localizado": { ponto: "bg-creme/35", texto: "text-creme/55" },
+};
+const SEM_STATUS = { ponto: "bg-creme/25", texto: "text-creme/55" };
+
+/** Nome do arquivo sem a extensão (o nome inteiro fica no título, ao passar o mouse). */
+const semExtensao = (arquivo: string) => arquivo.replace(/\.[a-z0-9]{2,5}$/i, "");
+
+function LinhaDoCampo({ d, onAbrir }: { d: DetalheCampo; onAbrir?: (alvo: AlvoPdf) => void }) {
+  const cor = d.status ? COR_STATUS_CAMPO[d.status] ?? SEM_STATUS : SEM_STATUS;
   return (
-    <div className="space-y-3 px-3 pb-5 pt-1">
-      {notas.length > 0 && (
-        <ul className="space-y-1 text-sm text-aviso/90">
-          {notas.map((n) => <li key={n}>• {n}</li>)}
-        </ul>
-      )}
-      {l.comparacoes.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-creme/45">Comparação carteira × documento</p>
-          <TabelaComparacoes comparacoes={l.comparacoes} campos={campos} />
-        </div>
-      )}
-      {l.evidencias.length === 0 ? (
-        <p className="text-sm text-creme/50">Nenhum documento da pasta foi ligado a este título.</p>
-      ) : (
-        <div className="overflow-x-auto rounded-xl ring-1 ring-creme/10">
-          <table className="w-full text-xs">
-            <thead className="bg-creme/[0.04] text-left text-creme/50">
-              <tr>
-                {["Campo", "No documento", "x Britech", "Documento", "Ligação", "Trecho"].map((t) => (
-                  <th key={t} className="px-3 py-2 font-medium">{t}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {l.evidencias.map((e, i) => (
-                <tr key={i} className="border-t border-creme/[0.06] align-top">
-                  <td className="whitespace-nowrap px-3 py-2 text-creme/70">{rotulos[e.campo]}</td>
-                  <td className="whitespace-nowrap px-3 py-2 tabular-nums text-creme">{e.valor}</td>
-                  <td className="px-3 py-2"><Status status={e.confere ? "Confere" : "Diverge"} /></td>
-                  <td className="max-w-[16rem] break-words px-3 py-2 text-creme/80">{e.documento}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-creme/55">{e.nivel}</td>
-                  <td className="min-w-[22rem] px-3 py-2 leading-relaxed text-creme/60">{e.trecho}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <li className="grid gap-x-4 gap-y-1 px-3 py-2.5 sm:grid-cols-[8.5rem_minmax(0,1fr)]">
+      <div className="flex items-center gap-2 self-start pt-0.5">
+        <span className={cn("size-1.5 shrink-0 rounded-full", cor.ponto)} />
+        <span className="text-sm text-creme/75">{d.rotulo}</span>
+      </div>
+      <div className="min-w-0 space-y-1 text-sm">
+        <p className="flex flex-wrap items-baseline gap-x-2">
+          <span className="tabular-nums text-creme">{d.carteira || "—"}</span>
+          {d.porque && <span className={cor.texto}>{d.porque}</span>}
+        </p>
+        {d.achado && (
+          <p className="flex min-w-0 items-baseline gap-1.5 text-xs text-creme/55">
+            <span className="shrink-0">{d.status === "Confere" || d.achado.relacao === "igual" || d.achado.relacao === "citado" ? "✓" : "≈"}</span>
+            <span className="min-w-0 truncate" title={`${d.achado.arquivo}${d.achado.trecho ? ` — ${d.achado.trecho}` : ""}`}>
+              {semExtensao(d.achado.arquivo)}
+            </span>
+            {d.achado.pagina > 0 && <span className="shrink-0">p. {d.achado.pagina}</span>}
+            {d.achado.rotulo && <span className="hidden shrink-0 text-creme/40 md:inline">· &quot;{d.achado.rotulo}&quot;</span>}
+            {onAbrir && (
+              <button
+                type="button"
+                onClick={() => onAbrir({ termo: d.achado!.valor, arquivo: d.achado!.arquivo, pagina: d.achado!.pagina })}
+                className="shrink-0 text-primary underline-offset-4 hover:underline"
+              >
+                abrir
+              </button>
+            )}
+          </p>
+        )}
+        {d.outros.length > 0 && (
+          <p className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-creme/55">
+            <span>{d.achado ? "outros documentos trazem" : "os documentos trazem"}</span>
+            {d.outros.slice(0, 4).map((o) => (
+              <button
+                key={o.valor}
+                type="button"
+                onClick={() => onAbrir?.({ termo: o.valor })}
+                className="tabular-nums text-aviso underline-offset-4 hover:underline"
+                title="Procurar este valor nos PDFs"
+              >
+                {o.valor}{o.docs > 1 ? ` (${o.docs} docs)` : ""}
+              </button>
+            ))}
+            {d.outros.length > 4 && <span>+{d.outros.length - 4}</span>}
+          </p>
+        )}
+        {d.wp && (
+          <p className="text-xs text-creme/55">
+            WP_Termo: <span className="tabular-nums text-aviso">{d.wp.valor || "em branco"}</span> ({d.wp.status === "Diverge" ? "diverge" : "conferir"})
+          </p>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * O detalhe do título, campo a campo: o valor da carteira, onde ele aparece (arquivo e página, com atalho para abrir),
+ * os outros valores dos documentos e o porquê numa frase. As comparações e evidências completas ficam em "ver tudo".
+ */
+function Detalhe({ l, campos, onBaterPdf }: { l: LinhaResultado; campos: Campos; onBaterPdf?: AbrirPdf }) {
+  const [tudo, setTudo] = useState(false);
+  const detalhes = useMemo(() => detalhesPorCampo(l, campos), [l, campos]);
+  const docs = useMemo(() => documentosDoTitulo(l), [l]);
+  const rotulos = Object.fromEntries(campos) as Record<string, string>;
+  const abrir = onBaterPdf ? (alvo: AlvoPdf) => onBaterPdf(l, alvo) : undefined;
+  return (
+    <div className="space-y-3 px-4 pb-4 pt-1">
+      <ul className="divide-y divide-creme/[0.06] rounded-xl bg-creme/[0.02] ring-1 ring-creme/10">
+        {detalhes.map((d) => <LinhaDoCampo key={d.chave} d={d} onAbrir={abrir} />)}
+      </ul>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-creme/50">
+        <p className="min-w-0">
+          {docs.length
+            ? <>Documentos ligados ({docs.length}): {docs.slice(0, 3).map((d) => semExtensao(d.arquivo)).join(" · ")}{docs.length > 3 ? ` +${docs.length - 3}` : ""}</>
+            : "Nenhum documento da pasta foi ligado a este título."}
+        </p>
+        {(l.comparacoes.length > 0 || l.evidencias.length > 0) && (
+          <button type="button" onClick={() => setTudo((t) => !t)} className="inline-flex items-center gap-1 underline-offset-4 hover:text-creme hover:underline">
+            {tudo ? "Esconder as comparações e evidências" : `Ver todas as comparações e evidências (${l.comparacoes.length + l.evidencias.length})`}
+            <ChevronDown className={cn("size-3.5 transition-transform", tudo && "rotate-180")} />
+          </button>
+        )}
+      </div>
+      {tudo && (
+        <div className="space-y-3">
+          {campos.some(([k]) => l.campos[k].nota) && (
+            <ul className="space-y-1 text-xs leading-relaxed text-creme/55">
+              {campos.filter(([k]) => l.campos[k].nota).map(([k, rot]) => <li key={k}><span className="text-creme/75">{rot}:</span> {l.campos[k].nota}</li>)}
+            </ul>
+          )}
+          {l.comparacoes.length > 0 && <TabelaComparacoes comparacoes={l.comparacoes} campos={campos} />}
+          {l.evidencias.length > 0 && (
+            <div className="overflow-x-auto rounded-xl ring-1 ring-creme/10">
+              <table className="w-full text-xs">
+                <thead className="bg-creme/[0.04] text-left text-creme/50">
+                  <tr>
+                    {["Campo", "No documento", "x carteira", "Documento", "Ligação", "Trecho"].map((t) => (
+                      <th key={t} className="px-3 py-2 font-medium">{t}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {l.evidencias.map((e, i) => (
+                    <tr key={i} className="border-t border-creme/[0.06] align-top">
+                      <td className="whitespace-nowrap px-3 py-2 text-creme/70">{rotulos[e.campo]}</td>
+                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-creme">{e.valor}</td>
+                      <td className="px-3 py-2"><Status status={e.confere ? "Confere" : "Diverge"} /></td>
+                      <td className="max-w-[16rem] break-words px-3 py-2 text-creme/80">{e.documento}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-creme/55">{e.nivel}</td>
+                      <td className="min-w-[22rem] px-3 py-2 leading-relaxed text-creme/60">{e.trecho}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function TabelaCompleta({ resultado, onBaterPdf }: { resultado: ResultadoCompleto; onBaterPdf: (l: LinhaResultado) => void }) {
+function TabelaCompleta({ resultado, onBaterPdf }: { resultado: ResultadoCompleto; onBaterPdf: AbrirPdf }) {
   const [filtro, setFiltro] = useState<Situacao | "">("");
   const [soWp, setSoWp] = useState(false);
   const [abertas, setAbertas] = useState<Set<number>>(new Set());
@@ -244,7 +340,7 @@ function TabelaCompleta({ resultado, onBaterPdf }: { resultado: ResultadoComplet
                             <FileSearch className="size-3.5" /> Bater PDF
                           </button>
                         </div>
-                        <Detalhe l={l} campos={campos} />
+                        <Detalhe l={l} campos={campos} onBaterPdf={onBaterPdf} />
                       </td>
                     </tr>
                   )}
@@ -266,7 +362,7 @@ const COR_OUTRO = { diverge: "text-erro", conferir: "text-aviso", aproximado: "t
  * documentos (ou a WP_Termo) trazem. O porquê, as comparações e as evidências abrem em "Detalhes".
  */
 function CartaoAtencao({ l, campos, onBaterPdf, acao, confirma }: {
-  l: LinhaResultado; campos: Campos; onBaterPdf: (l: LinhaResultado) => void; acao?: React.ReactNode; confirma?: boolean;
+  l: LinhaResultado; campos: Campos; onBaterPdf: AbrirPdf; acao?: React.ReactNode; confirma?: boolean;
 }) {
   const [aberto, setAberto] = useState(false);
   const pontos = pontosDaLinha(l, campos);
@@ -305,7 +401,7 @@ function CartaoAtencao({ l, campos, onBaterPdf, acao, confirma }: {
             <Check className="size-3.5" /> {campos[0][1]} e {campos[1][1]} conferem com os documentos
           </p>
         )}
-        <ul className="mt-2 space-y-1 text-sm">
+        <ul className={cn("mt-2 space-y-1 text-sm", aberto && "hidden")}>
           {pontos.map((p, i) => (
             <li key={i} className="grid grid-cols-[0.375rem_minmax(0,1fr)] items-baseline gap-x-2.5 sm:grid-cols-[0.375rem_8rem_minmax(0,1fr)]">
               <span className={cn("size-1.5 translate-y-[-0.1rem] rounded-full", COR_PONTO[p.tipo])} />
@@ -323,14 +419,14 @@ function CartaoAtencao({ l, campos, onBaterPdf, acao, confirma }: {
           <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-sky-300"><Link2 className="size-3.5" /> vinculado à mão: {l.manual}</p>
         )}
       </div>
-      {aberto && <div className="border-t border-border pt-4"><Detalhe l={l} campos={campos} /></div>}
+      {aberto && <div className="border-t border-border pt-4"><Detalhe l={l} campos={campos} onBaterPdf={onBaterPdf} /></div>}
     </li>
   );
 }
 
 /** Lista de cartões em blocos (50 por vez), para a tela não pesar com centenas de títulos. */
 function ListaDeCartoes({ linhas, campos, onBaterPdf, acaoDe, confirma }: {
-  linhas: LinhaResultado[]; campos: Campos; onBaterPdf: (l: LinhaResultado) => void;
+  linhas: LinhaResultado[]; campos: Campos; onBaterPdf: AbrirPdf;
   acaoDe?: (l: LinhaResultado) => React.ReactNode; confirma?: boolean;
 }) {
   const [mostrar, setMostrar] = useState(50);
@@ -416,7 +512,7 @@ export function Resultado({ resultado, onBaixar, baixando }: {
 }) {
   const [vista, setVista] = useState<"resumo" | "tabela">("resumo");
   const [vinculos, setVinculos] = useState<Map<number, Vinculo>>(() => new Map());
-  const [bater, setBater] = useState<{ linhaId: number | null; termo: string } | null>(null);
+  const [bater, setBater] = useState<{ linhaId: number | null; termo: string; doc?: { nome: string; pagina: number } } | null>(null);
   const [preAberta, setPreAberta] = useState(false);
   const [aprovados, setAprovados] = useState<Set<number>>(() => new Set());
   // os vínculos feitos à mão no Bater PDF e as aprovações do analista valem mais que a conferência automática (tela e Excel)
@@ -438,7 +534,10 @@ export function Resultado({ resultado, onBaixar, baixando }: {
   const campos = camposDe(r.tipo);
   const termoDe = (l: LinhaResultado) =>
     (rec && l.codigo.length >= 3 ? l.codigo : "") || l.campos.valor.britech.split(" ")[0] || l.emissor.split(" ").slice(0, 2).join(" ");
-  const abrirBater = (l: LinhaResultado | null) => setBater({ linhaId: l?.id ?? null, termo: l ? termoDe(l) : "" });
+  const abrirBater = (l: LinhaResultado | null, alvo?: AlvoPdf) => setBater({
+    linhaId: l?.id ?? null, termo: alvo?.termo ?? (l ? termoDe(l) : ""),
+    doc: alvo?.arquivo ? { nome: alvo.arquivo, pagina: alvo.pagina ?? 1 } : undefined,
+  });
   const fecharBater = useCallback(() => setBater(null), []);
   const fecharPre = useCallback(() => setPreAberta(false), []);
   const nPendentes = useMemo(() => pendentes(r.linhas).length, [r.linhas]);
@@ -618,6 +717,7 @@ export function Resultado({ resultado, onBaixar, baixando }: {
           linha={bater.linhaId !== null ? r.linhas.find((x) => x.id === bater.linhaId) ?? null : null}
           campos={campos}
           termoInicial={bater.termo}
+          docInicial={bater.doc}
           onVincular={(id, v) => {
             setVinculos((m) => new Map(m).set(id, v));
             setBater(null);
