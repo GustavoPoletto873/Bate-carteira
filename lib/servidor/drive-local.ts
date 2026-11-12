@@ -7,7 +7,7 @@ import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import {
-  foraDoApp, interpretarWorkpaper, ordenarFundos, ordenarPastas, procurarAmostrasEstoques, SUBPASTAS, type Administradora,
+  foraDoApp, fundosSoComAmostra, interpretarWorkpaper, ordenarFundos, ordenarPastas, procurarAmostrasEstoques, SUBPASTAS, type Administradora,
   type ArquivoDeRecebiveis, type CarteiraFormatada, type FundoDrive,
 } from "../lastro/drive-comum";
 import { ehCarteiraDoFundo, pastaDaData } from "../lastro/planilhas";
@@ -69,7 +69,17 @@ export async function listarFundos(base: string): Promise<FundoDrive[]> {
       fundos.push({ ...wp, arquivo: e.name, caminho, pasta: sub, modificado: info ? info.mtime.toISOString() : "" });
     }
   }
+  fundos.push(...await fundosSoComAmostra(leitorLocal(base), new Set(fundos.map((f) => f.cnpj))));
   return ordenarFundos(fundos);
+}
+
+/** Leitura de pastas a partir da pasta da administradora (para as buscas comuns ao servidor e ao navegador). */
+function leitorLocal(base: string) {
+  return {
+    itens: async (rel: string) => (await readdir(path.join(base, rel), { withFileTypes: true }))
+      .map((e) => ({ nome: e.name, pasta: e.isDirectory() })),
+    caminho: (rel: string) => path.join(base, rel),
+  };
 }
 
 // ------------------------------------------------------------------ pasta de lastro do fundo
@@ -157,9 +167,5 @@ export async function carteiraFormatada(base: string, cnpj: string, dataBase: st
 
 /** Amostra e estoque do fundo nas pastas da administradora (administradoras sem Britech). */
 export async function amostrasEstoques(base: string, fundo: string, cnpj: string): Promise<ArquivoDeRecebiveis[]> {
-  return procurarAmostrasEstoques({
-    itens: async (rel) => (await readdir(path.join(base, rel), { withFileTypes: true }))
-      .map((e) => ({ nome: e.name, pasta: e.isDirectory() })),
-    caminho: (rel) => path.join(base, rel),
-  }, fundo, cnpj);
+  return procurarAmostrasEstoques(leitorLocal(base), fundo, cnpj);
 }

@@ -447,3 +447,26 @@ export function pastaDaData(dataBase: string | null): string {
   const [a, m, d] = dataBase.split("-");
   return `${d}.${m}.${a}`;
 }
+
+/**
+ * Fundo sem workpaper: a amostra (NU_DOCUMENTO, NOME_SACADO, VALOR_AQUISICAO, DATA_EMISSAO…) faz o papel da WP_Termo.
+ * Sem a aba carteiraInforme nem a WP_Lastro, a validação da carteira fica de fora.
+ */
+export function workpaperDaAmostra(bytes: Uint8Array, arquivo: string, cnpj: string, fundo: string, dataBase: string | null): Workpaper {
+  const semRecebiveis = `A amostra "${arquivo}" não tem recebíveis no layout esperado (NU_DOCUMENTO, NOME_SACADO, VALOR_AQUISICAO…).`;
+  let recebiveis: Posicao[];
+  try {
+    recebiveis = lerCarteira(bytes, arquivo).filter((p) => p.tipo === "recebivel");
+  } catch (e) {
+    if (e instanceof ErroDeEntrada) throw new ErroDeEntrada(semRecebiveis);
+    throw e;
+  }
+  if (!recebiveis.length) throw new ErroDeEntrada(semRecebiveis);
+  const linhas: LinhaWP[] = recebiveis.map((p, i) => ({
+    linhaExcel: p.linha, idBase: String(i + 1), numeroDoc: p.codigo, valorAquisicao: p.valorAplicado, valorNominal: p.valorNominal,
+    dataEmissao: p.dataEmissao, dataVencimento: p.dataVencimento, dataAquisicao: p.dataAquisicao, tipoRecebivel: p.grupo,
+    nomeSacado: p.emissor, nomeCedente: p.cedente ?? "", status: "", amostra: "",
+  }));
+  const referencia = recebiveis.find((p) => p.dataReferencia)?.dataReferencia ?? null;
+  return { arquivo, fundo, cnpj, dataBase: dataBase ?? referencia, linhas, carteiraInforme: [], lastro: null };
+}

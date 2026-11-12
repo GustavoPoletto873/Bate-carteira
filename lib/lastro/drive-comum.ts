@@ -47,6 +47,8 @@ export interface FundoDrive {
   caminho: string;
   pasta: string;
   modificado: string;
+  /** fundo sem WP_….xlsm em _Workpapers: o arquivo é a amostra, que faz o papel da WP_Termo */
+  semWorkpaper?: boolean;
 }
 
 export interface PastaLastro {
@@ -124,6 +126,43 @@ export async function procurarAmostrasEstoques(leitor: LeitorDePastas, fundo: st
   const nivel = (a: ArquivoDeRecebiveis) => a.pasta.split("/").length;
   return achados.sort((a, b) => ordem[a.tipo] - ordem[b.tipo] || b.pontos - a.pontos || nivel(a) - nivel(b)
     || a.pasta.localeCompare(b.pasta, "pt-BR") || a.arquivo.localeCompare(b.arquivo, "pt-BR"));
+}
+
+/** 'Amostra_<cnpj>_<fundo>.xlsx' → { fundo, cnpj }; null se não for amostra com o CNPJ no nome. */
+export function interpretarAmostra(nome: string): { fundo: string; cnpj: string } | null {
+  if (nome.startsWith("~$")) return null;
+  const m = nome.match(/^Amostra_(\d{14})_(.+?)\s*\.(xlsx|xlsm|xls|csv)$/i);
+  return m ? { cnpj: m[1], fundo: m[2].trim() } : null;
+}
+
+/**
+ * Fundos que têm a amostra (_Amostra/_Amostras, até 2 níveis) mas não têm o WP_….xlsm em _Workpapers — ex.: fundo
+ * novo da administradora antes de o workpaper ser gerado. Nessas administradoras a WP_Termo é a própria amostra.
+ */
+export async function fundosSoComAmostra(leitor: LeitorDePastas, comWorkpaper: Set<string>): Promise<FundoDrive[]> {
+  const achados = new Map<string, FundoDrive>();
+  const percorrer = async (rel: string, nivel: number) => {
+    for (const item of await leitor.itens(rel).catch(() => [])) {
+      const filho = `${rel}/${item.nome}`;
+      if (item.pasta) {
+        if (nivel < 2) await percorrer(filho, nivel + 1);
+        continue;
+      }
+      const a = interpretarAmostra(item.nome);
+      if (!a || comWorkpaper.has(a.cnpj) || achados.has(a.cnpj)) continue;
+      achados.set(a.cnpj, { ...a, arquivo: item.nome, caminho: leitor.caminho(filho), pasta: rel, modificado: "", semWorkpaper: true });
+    }
+  };
+  for (const item of await leitor.itens("").catch(() => [])) {
+    if (item.pasta && PASTA_AMOSTRA.test(item.nome)) await percorrer(item.nome, 1);
+  }
+  return [...achados.values()];
+}
+
+/** Fim do trimestre citado no caminho (…\2T2026\… → 2026-06-30); null se não houver. */
+export function dataDoTrimestre(texto: string): string | null {
+  const m = texto.match(/(?<!\d)([1-4])T(20\d{2})(?!\d)/i);
+  return m ? `${m[2]}-${{ 1: "03-31", 2: "06-30", 3: "09-30", 4: "12-31" }[Number(m[1]) as 1 | 2 | 3 | 4]}` : null;
 }
 
 /** 'WP_<fundo>_<cnpj>.xlsm' → { fundo, cnpj }; null se não for workpaper. */

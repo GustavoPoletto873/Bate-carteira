@@ -27,6 +27,9 @@ O `npm install` também copia o worker e as fontes do pdf.js para `public/pdfjs`
 
 1. **Fundo**: busque pelo nome ou CNPJ. A lista vem dos `WP_<fundo>_<cnpj>.xlsm` de `_Workpapers` (e `_Workpapers\WPS`)
    da pasta do trimestre. O app lê a WP_Termo, o CNPJ e a data-base.
+   Fundo que ainda não tem workpaper, mas tem a amostra (`_Amostra(s)\Amostra_<cnpj>_<fundo>.xlsx`), também aparece
+   ("sem workpaper"): a amostra faz o papel da WP_Termo, a data-base vem do trimestre da pasta (ex.: 2T2026 → 30/06/2026)
+   e a validação da carteira fica de fora (não há a aba carteiraInforme).
 2. **Carteira**:
    - *API Britech*: o app procura o CNPJ ao mesmo tempo na Britech de todas as administradoras configuradas
      (`Fundo/BuscaCarteiraClientePorCPFCNPJ`), mostra em qual achou e, ao conferir,

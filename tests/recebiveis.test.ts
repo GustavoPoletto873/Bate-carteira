@@ -6,8 +6,8 @@ import * as XLSX from "xlsx";
 import { describe, expect, it } from "vitest";
 import { conferir, recortarPelaWp } from "../lib/lastro/conciliacao";
 import { analisar, grupoDoNome } from "../lib/lastro/documentos";
-import { arquivoDeRecebiveis, procurarAmostrasEstoques, type LeitorDePastas } from "../lib/lastro/drive-comum";
-import { lerCarteira, recebiveisDaTabela, type LinhaWP, type Posicao } from "../lib/lastro/planilhas";
+import { arquivoDeRecebiveis, dataDoTrimestre, fundosSoComAmostra, interpretarAmostra, procurarAmostrasEstoques, type LeitorDePastas } from "../lib/lastro/drive-comum";
+import { lerCarteira, recebiveisDaTabela, workpaperDaAmostra, type LinhaWP, type Posicao } from "../lib/lastro/planilhas";
 
 const CAB_FROMTIS = ["NOME_FUNDO", "NOME_CEDENTE", "DOC_CEDENTE", "NOME_SACADO", "DOC_SACADO", "SEU_NUMERO", "NU_DOCUMENTO",
   "TIPO_RECEBIVEL", "VALOR_NOMINAL", "VALOR_PRESENTE", "VALOR_AQUISICAO", "DATA_VENCIMENTO_ORIGINAL", "DATA_VENCIMENTO_AJUSTADA",
@@ -143,5 +143,44 @@ describe("conferência de recebíveis com duplicatas", () => {
     const outra = analisar("dup.pdf", "Duplicata número 50001-001 emitida pela AGRO EXEMPLO, sacado JOAO EXEMPLO DA SILVA, R$ 100,00");
     const l = conferir([recebivel()], [], [outra]).linhas[0];
     expect(l.docsMesmaOperacao).toBe(1);
+  });
+});
+
+describe("fundo sem workpaper (só a amostra)", () => {
+  it("lista o fundo que tem amostra mas não tem WP, e não repete o que tem", async () => {
+    const arvore: Record<string, string[]> = {
+      "": ["_Amostras/", "_Workpapers/", "Estoques/"],
+      _Amostras: ["Amostra_11222333000181_FUNDO X.xlsx", "Amostra_22333444000155_FUNDO NOVO .xlsx", "~$Amostra_22333444000155_FUNDO NOVO .xlsx", "Revisadas/"],
+      "_Amostras/Revisadas": ["Amostra_22333444000155_FUNDO NOVO .xlsx", "Amostra_33444555000166_FUNDO OUTRO.csv"],
+      _Workpapers: ["WP_FUNDO X_11222333000181.xlsm"],
+      Estoques: ["Amostra_44555666000177_FORA.xlsx"],
+    };
+    const leitor: LeitorDePastas = {
+      itens: async (rel) => (arvore[rel] ?? []).map((n) => ({ nome: n.replace(/\/$/, ""), pasta: n.endsWith("/") })),
+      caminho: (rel) => `G:/X/${rel}`,
+    };
+    const fundos = await fundosSoComAmostra(leitor, new Set(["11222333000181"]));
+    expect(fundos.map((f) => [f.fundo, f.cnpj, f.pasta, f.caminho, f.semWorkpaper])).toEqual([
+      ["FUNDO NOVO", "22333444000155", "_Amostras", "G:/X/_Amostras/Amostra_22333444000155_FUNDO NOVO .xlsx", true],
+      ["FUNDO OUTRO", "33444555000166", "_Amostras/Revisadas", "G:/X/_Amostras/Revisadas/Amostra_33444555000166_FUNDO OUTRO.csv", true],
+    ]);
+    expect(interpretarAmostra("Amostra_FUNDO SEM CNPJ.xlsx")).toBeNull();
+  });
+
+  it("a amostra vira a WP_Termo, com a data-base do trimestre da pasta", () => {
+    const bytes = xlsx([CAB_FROMTIS, [
+      "FIDC ALFA", "ACME ESQUADRIAS LTDA", "1", "CONSTRUTORA EXEMPLO E ACA", "2", "R00000000001 01", "R000000101",
+      "Duplicata", 10000.5, 9700.1, 9500.25, "2026-07-13 00:00:00", "2026-07-14 00:00:00", "2026-05-25 00:00:00", "2026-05-26 00:00:00",
+    ]]);
+    const data = dataDoTrimestre("G:/Drives compartilhados/Auditoria/2T2026/SOLIS/_Amostras/a.xlsx");
+    expect(data).toBe("2026-06-30");
+    const wp = workpaperDaAmostra(bytes, "Amostra_11222333000181_FIDC ALFA.xlsx", "11222333000181", "FIDC ALFA", data);
+    expect(wp).toMatchObject({ cnpj: "11222333000181", fundo: "FIDC ALFA", dataBase: "2026-06-30", carteiraInforme: [], lastro: null });
+    expect(wp.linhas[0]).toMatchObject({
+      numeroDoc: "R000000101", nomeSacado: "CONSTRUTORA EXEMPLO E ACA", nomeCedente: "ACME ESQUADRIAS LTDA", valorAquisicao: 950025,
+      valorNominal: 1000050, dataEmissao: "2026-05-25", dataVencimento: "2026-07-13", dataAquisicao: "2026-05-26", tipoRecebivel: "Duplicata",
+    });
+    expect(dataDoTrimestre("pasta escolhida/SOLIS")).toBeNull();
+    expect(() => workpaperDaAmostra(xlsx([["A", "B"], [1, 2]]), "Amostra_x.xlsx", "1", "F", null)).toThrow(/não tem recebíveis/);
   });
 });
