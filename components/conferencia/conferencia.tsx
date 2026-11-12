@@ -143,9 +143,10 @@ export function Conferencia() {
       }
 
       setProgresso({ atual: 1, total: 1, texto: "Conferindo" });
-      // estoque completo (amostra como carteira): só para a validação da carteira
+      // estoque completo (amostra como carteira): só para a validação da carteira, que precisa da aba carteiraInforme
+      // (sem ela — ex.: fundo sem workpaper — não vale ler o estoque, que pode ter dezenas de MB)
       let estoque: { posicoes: ReturnType<typeof lerCarteira>; origem: string } | undefined;
-      if (p.estoque) {
+      if (p.estoque && p.workpaper.carteiraInforme.length) {
         setProgresso({ atual: 0, total: 0, texto: "Lendo o estoque para validar a carteira" });
         try {
           const arq = await p.estoque.obter();

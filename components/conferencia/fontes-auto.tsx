@@ -4,8 +4,8 @@ import { FileSpreadsheet, FolderOpen, Landmark, Loader2, Search } from "lucide-r
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArquivoEntrada } from "@/lib/lastro/pipeline";
 import { opcoesDeCarteira, type OpcaoCarteira } from "@/lib/lastro/carteiras";
-import type { Administradora, ProvedorDrive } from "@/lib/lastro/drive-comum";
-import { lerWorkpaper, type Workpaper } from "@/lib/lastro/planilhas";
+import { dataDoTrimestre, type Administradora, type ProvedorDrive } from "@/lib/lastro/drive-comum";
+import { lerWorkpaper, workpaperDaAmostra, type Workpaper } from "@/lib/lastro/planilhas";
 import {
   servidor, type ArquivoDeRecebiveis, type CarteiraFormatada, type FundoDrive, type FundoMonday, type PapelDoFundo, type PastaLastro,
   type StatusServidor,
@@ -73,7 +73,8 @@ function SeletorFundo({ fundos, carregando, erro, escolhido, onEscolher }: {
               >
                 <span className="block truncate text-sm text-creme">{f.fundo}</span>
                 <span className="block text-xs text-creme/45">
-                  {f.cnpj ? fmtCnpj(f.cnpj) : "sem CNPJ no nome"} · {f.pasta} · {fmtDia(f.modificado)}
+                  {f.cnpj ? fmtCnpj(f.cnpj) : "sem CNPJ no nome"} · {f.pasta}
+                  {f.semWorkpaper ? <> · <span className="text-aviso">sem workpaper (usa a amostra)</span></> : <> · {fmtDia(f.modificado)}</>}
                 </span>
               </button>
             </li>
@@ -250,7 +251,10 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
     setPastaSel("");
     setLastro(null);
     try {
-      const lido = lerWorkpaper(await provedor.arquivo(f.caminho), f.arquivo);
+      const bytes = await provedor.arquivo(f.caminho);
+      const lido = f.semWorkpaper
+        ? workpaperDaAmostra(bytes, f.arquivo, f.cnpj, f.fundo, dataDoTrimestre(`${baseAplicada}/${f.caminho}`))
+        : lerWorkpaper(bytes, f.arquivo);
       if (v !== vez.current) return;
       setWp(lido);
       setDataBase(lido.dataBase ?? "");
@@ -375,7 +379,9 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
               <div className="mt-1 text-xs text-creme/60">
                 {carregandoWp ? <span className="inline-flex items-center gap-2"><Loader2 className="size-3 animate-spin" /> Lendo o workpaper…</span>
                   : wpErro ? <span className="text-erro">{wpErro}</span>
-                    : wp && <><span className="text-creme/85">{wp.fundo}</span> · CNPJ {fmtCnpj(wp.cnpj)} · {wp.linhas.length} linha(s) na WP_Termo</>}
+                    : wp && (fundo.semWorkpaper
+                      ? <><span className="text-creme/85">{wp.fundo}</span> · CNPJ {fmtCnpj(wp.cnpj)} · sem workpaper: {wp.linhas.length} recebível(is) da amostra no lugar da WP_Termo</>
+                      : <><span className="text-creme/85">{wp.fundo}</span> · CNPJ {fmtCnpj(wp.cnpj)} · {wp.linhas.length} linha(s) na WP_Termo</>)}
               </div>
             </div>
           )}

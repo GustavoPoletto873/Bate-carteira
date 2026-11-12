@@ -6,7 +6,7 @@
  * Caminhos de arquivo/pasta neste provedor são "pasta:<caminho relativo à pasta escolhida>".
  */
 import {
-  foraDoApp, interpretarWorkpaper, ordenarFundos, ordenarPastas, procurarAmostrasEstoques, SUBPASTAS, type Administradora,
+  foraDoApp, fundosSoComAmostra, interpretarWorkpaper, ordenarFundos, ordenarPastas, procurarAmostrasEstoques, SUBPASTAS, type Administradora,
   type CarteiraFormatada, type FundoDrive, type ProvedorDrive,
 } from "./drive-comum";
 import { listarPasta, type HandleArquivo, type HandlePasta } from "./fontes";
@@ -56,6 +56,15 @@ export async function conferirPastaBase(raiz: HandlePasta): Promise<string | nul
 }
 
 export function criarProvedorPasta(raiz: HandlePasta): ProvedorDrive {
+  /** leitura de pastas a partir da pasta da administradora (buscas comuns ao servidor e ao navegador) */
+  const leitor = (base: string) => ({
+    async itens(rel: string) {
+      const dir = await subpasta(raiz, juntar(base, rel));
+      return dir ? (await filhos(dir)).map((h) => ({ nome: h.name, pasta: h.kind === "directory" })) : [];
+    },
+    caminho: (rel: string) => PREFIXO + juntar(base, rel),
+  });
+
   async function arquivo(caminho: string): Promise<HandleArquivo> {
     const partes = relativo(caminho).split("/").filter(Boolean);
     const nome = partes.pop() ?? "";
@@ -84,6 +93,7 @@ export function criarProvedorPasta(raiz: HandlePasta): ProvedorDrive {
         }));
         fundos.push(...achados.filter((f): f is FundoDrive => !!f));
       }
+      fundos.push(...await fundosSoComAmostra(leitor(base), new Set(fundos.map((f) => f.cnpj))));
       if (!fundos.length && !(await subpasta(raiz, juntar(base, SUBPASTAS.workpapers[0])))) {
         throw new Error(`Não achei "${SUBPASTAS.workpapers[0]}" em "${base || raiz.name}".`);
       }
@@ -125,12 +135,6 @@ export function criarProvedorPasta(raiz: HandlePasta): ProvedorDrive {
       return null;
     },
 
-    amostrasEstoques: (base, fundo, cnpj) => procurarAmostrasEstoques({
-      async itens(rel) {
-        const dir = await subpasta(raiz, juntar(base, rel));
-        return dir ? (await filhos(dir)).map((h) => ({ nome: h.name, pasta: h.kind === "directory" })) : [];
-      },
-      caminho: (rel) => PREFIXO + juntar(base, rel),
-    }, fundo, cnpj),
+    amostrasEstoques: (base, fundo, cnpj) => procurarAmostrasEstoques(leitor(base), fundo, cnpj),
   };
 }
