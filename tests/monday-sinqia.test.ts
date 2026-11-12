@@ -88,4 +88,16 @@ describe("Sinqia", () => {
     await expect(carteiraSinqia("TESTE", "1", "2026-06-30")).rejects.toThrow(/nova tentativa/);
     expect(recusa).toHaveBeenCalledTimes(1);
   });
+
+  it("403 antes do login: diz quem bloqueou, o que respondeu e de que região saiu; não pausa", async () => {
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    const bloqueio = vi.fn(async () => new Response("<html><head><style>h1{x:1}</style></head><body><h1>403 Forbidden</h1></body></html>", {
+      status: 403, headers: { server: "nginx" },
+    }));
+    vi.stubGlobal("fetch", bloqueio);
+    const erro = await carteiraSinqia("TESTE", "1", "2026-06-30").catch((e: Error) => e.message);
+    expect(erro).toContain("bloqueou o pedido antes do login (HTTP 403 — servidor: nginx; resposta: \"403 Forbidden\"; app na região iad1 da Vercel)");
+    await carteiraSinqia("TESTE", "1", "2026-06-30").catch(() => null);
+    expect(bloqueio).toHaveBeenCalledTimes(2);
+  });
 });

@@ -185,7 +185,9 @@ Veja `.env.example`.
 3. Deploy. Na tela, clique em **Escolher pasta** e escolha a pasta do trimestre no `G:`.
 
 Na Vercel o `G:` não existe para o servidor: o Drive é lido pelo navegador de cada pessoa (pasta do computador).
-Se a Britech só aceitar chamadas de IPs liberados, a API dela não vai responder a partir da Vercel.
+As funções rodam em São Paulo (`gru1`, no `vercel.json`): sistemas que só aceitam IPs do Brasil recusam pedidos da região
+padrão da Vercel (EUA). Se um sistema só aceitar IPs liberados (ex.: o do escritório), a API dele não vai responder a
+partir da Vercel; o erro mostra quem bloqueou e de que região saiu o pedido.
 
 ## Testes
 
