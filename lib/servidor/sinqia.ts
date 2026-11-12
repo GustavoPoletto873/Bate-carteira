@@ -33,6 +33,23 @@ function instancia(adm: string): InstanciaSinqia {
   return i;
 }
 
+/**
+ * Quem recusou e por quê, para o erro mostrar: cabeçalhos server/via, o começo da resposta (sem HTML) e, na Vercel,
+ * a região de onde o pedido saiu. Vazio quando não há nada a dizer; senão começa com " — ".
+ */
+export async function motivoDaResposta(r: Response): Promise<string> {
+  const quem = [r.headers.get("server"), r.headers.get("via")].filter(Boolean).join(", ");
+  const texto = (await r.text().catch(() => ""))
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  const regiao = process.env.VERCEL_REGION;
+  const partes = [quem && `servidor: ${quem}`, texto && `resposta: "${texto}"`, regiao && `app na região ${regiao} da Vercel`].filter(Boolean);
+  return partes.length ? ` — ${partes.join("; ")}` : "";
+}
+
 const tokens = new Map<string, { token: string; ate: number }>();
 const pausadas = new Map<string, { ate: number; erro: string }>();
 const PAUSA_MS = 15 * 60 * 1000;
@@ -59,11 +76,18 @@ async function token(inst: InstanciaSinqia): Promise<string> {
     throw new ErroSinqia(`Não consegui falar com o login do Sinqia da ${inst.nome}: ${(e as Error)?.message ?? e}`);
   }
   if (r.status === 400 || r.status === 401) {
-    const erro = `O Sinqia da ${inst.nome} recusou o usuário e a senha (HTTP ${r.status}). Confira SINQIA_${inst.adm}_USUARIO e _SENHA`;
+    const erro = `O Sinqia da ${inst.nome} recusou o usuário e a senha (HTTP ${r.status}${await motivoDaResposta(r)}). Confira SINQIA_${inst.adm}_USUARIO e _SENHA`;
     pausadas.set(inst.adm, { ate: Date.now() + PAUSA_MS, erro });
     throw new ErroSinqia(erro);
   }
-  if (!r.ok) throw new ErroSinqia(`O login do Sinqia da ${inst.nome} respondeu HTTP ${r.status}.`);
+  if (r.status === 403) {
+    // o Keycloak responde 400/401 para senha errada; 403 vem de quem está na frente dele (firewall/proxy), antes do login
+    throw new ErroSinqia(
+      `O servidor do Sinqia da ${inst.nome} bloqueou o pedido antes do login (HTTP 403${await motivoDaResposta(r)}). ` +
+        "Costuma ser bloqueio por IP ou país: da rede do escritório o login funciona.",
+    );
+  }
+  if (!r.ok) throw new ErroSinqia(`O login do Sinqia da ${inst.nome} respondeu HTTP ${r.status}${await motivoDaResposta(r)}.`);
   const corpo = (await r.json().catch(() => ({}))) as { access_token?: string; expires_in?: number };
   if (!corpo.access_token) throw new ErroSinqia(`O login do Sinqia da ${inst.nome} não devolveu o token.`);
   tokens.set(inst.adm, { token: corpo.access_token, ate: Date.now() + Math.max(30, (corpo.expires_in ?? 300) - 30) * 1000 });
@@ -112,7 +136,7 @@ export async function carteiraSinqia(adm: string, carteira: string, data: string
     throw new ErroSinqia(`Não consegui falar com o Sinqia da ${inst.nome}: ${(e as Error)?.message ?? e}`);
   }
   if (r.status === 404) throw new ErroSinqia(`O Sinqia da ${inst.nome} não tem a carteira ${codigo} em ${data}.`);
-  if (!r.ok) throw new ErroSinqia(`O Sinqia da ${inst.nome} respondeu HTTP ${r.status} para a carteira ${codigo}.`);
+  if (!r.ok) throw new ErroSinqia(`O Sinqia da ${inst.nome} respondeu HTTP ${r.status}${await motivoDaResposta(r)} para a carteira ${codigo}.`);
   const dados = await r.json().catch(() => null);
   if (!dados) throw new ErroSinqia(`O Sinqia da ${inst.nome} não devolveu a posição em JSON.`);
   const titulos = papeisDaPosicao(dados).length;
