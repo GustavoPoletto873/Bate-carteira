@@ -29,6 +29,18 @@ export interface LinhaWP {
   nomeSacado: string;
   nomeCedente: string;
   status: string;
+  /** coluna "Amostra" da WP_Termo: Direitos creditórios vincendos / vencidos / Recompra */
+  amostra: string;
+}
+
+/** Linha da aba carteiraInforme: a carteira enviada pela administradora, já classificada nas categorias da CVM. */
+export interface LinhaInforme {
+  dataBase: string | null;
+  descricao: string;
+  /** centavos */
+  valor: number;
+  /** categoria do informe da CVM (coluna "Mapeamento") */
+  mapeamento: string;
 }
 
 export interface Workpaper {
@@ -37,6 +49,10 @@ export interface Workpaper {
   cnpj: string;
   dataBase: string | null;
   linhas: LinhaWP[];
+  /** carteira do fundo na aba carteiraInforme (só as linhas do CNPJ do fundo) */
+  carteiraInforme: LinhaInforme[];
+  /** status (V/P) da aba WP_Lastro */
+  lastro: { verificados: number; pendentes: number } | null;
 }
 
 const OBRIGATORIAS_WP = ["BASE_VALOR_AQUISICAO", "BASE_DATA_EMISSAO", "BASE_DATA_VENCIMENTO"];
@@ -75,7 +91,7 @@ export function lerWorkpaper(bytes: Uint8Array, arquivo: string): Workpaper {
   if (!abaTermo) {
     throw new ErroDeEntrada(`O workpaper "${arquivo}" não tem a aba WP_Termo. Abas encontradas: ${nomes.join(", ")}.`);
   }
-  const outras = nomes.filter((n) => n.toLowerCase().startsWith("resumo") || n.toLowerCase() === "carteirainforme");
+  const outras = nomes.filter((n) => ["carteirainforme", "wp_lastro"].includes(n.trim().toLowerCase()) || n.toLowerCase().startsWith("resumo"));
   const wb = XLSX.read(bytes, { type: "array", sheets: [abaTermo, ...outras], dense: true });
   const { linhas, primeira } = linhasDaAba(wb.Sheets[abaTermo]);
 
@@ -94,7 +110,7 @@ export function lerWorkpaper(bytes: Uint8Array, arquivo: string): Workpaper {
     throw new ErroDeEntrada(`A aba WP_Termo não tem as colunas ${faltando.join(", ")}. Confira se o workpaper está no modelo atual.`);
   }
 
-  const wp: Workpaper = { arquivo, fundo: "", cnpj: "", dataBase: dataBaseDoWorkpaper(wb), linhas: [] };
+  const wp: Workpaper = { arquivo, fundo: "", cnpj: "", dataBase: dataBaseDoWorkpaper(wb), linhas: [], carteiraInforme: [], lastro: null };
   linhas.slice(iCab + 1).forEach((linha, k) => {
     const col = (nome: string) => {
       const i = colunas.get(nome);
@@ -115,6 +131,7 @@ export function lerWorkpaper(bytes: Uint8Array, arquivo: string): Workpaper {
       nomeSacado: texto(col("BASE_NOME_SACADO")),
       nomeCedente: texto(col("BASE_NOME_CEDENTE")),
       status: texto(col("STATUS")),
+      amostra: texto(col("AMOSTRA")),
     });
     if (!wp.fundo) wp.fundo = texto(col("BASE_NOME_FUNDO"));
     if (!wp.cnpj) wp.cnpj = soDigitos(col("BASE_CNPJ_FUNDO"));
@@ -125,7 +142,41 @@ export function lerWorkpaper(bytes: Uint8Array, arquivo: string): Workpaper {
     if (m) wp.cnpj = m[1];
   }
   if (!wp.fundo) wp.fundo = arquivo.replace(/\.[^.]+$/, "").replace(/^WP_|_\d{14}$/g, "");
+  wp.carteiraInforme = lerCarteiraInforme(wb, wp.cnpj);
+  wp.lastro = statusDoLastro(wb);
   return wp;
+}
+
+/** Aba carteiraInforme (Data Base | CNPJ Fundo | Descricao | Valor | … | Mapeamento): só as linhas do fundo. */
+function lerCarteiraInforme(wb: XLSX.WorkBook, cnpj: string): LinhaInforme[] {
+  const nome = wb.SheetNames.find((n) => n.trim().toLowerCase() === "carteirainforme");
+  if (!nome || !cnpj) return [];
+  const { linhas } = linhasDaAba(wb.Sheets[nome]);
+  const iCab = linhas.slice(0, 10).findIndex((l) => l.some((v) => chave(v) === "mapeamento"));
+  if (iCab < 0) return [];
+  const chaves = linhas[iCab].map(chave);
+  const indice = (...nomes: string[]) => chaves.findIndex((k) => nomes.includes(k));
+  const [iData, iCnpj, iDesc, iValor, iMap] = [indice("data base"), indice("cnpj fundo", "cnpj"), indice("descricao"), indice("valor"), indice("mapeamento")];
+  if (iCnpj < 0 || iValor < 0 || iMap < 0) return [];
+  return linhas.slice(iCab + 1)
+    .filter((l) => soDigitos(l[iCnpj]) === cnpj && texto(l[iMap]))
+    .map((l) => ({
+      dataBase: iData >= 0 ? paraData(l[iData]) : null, descricao: iDesc >= 0 ? texto(l[iDesc]) : "",
+      valor: paraCentavos(l[iValor]) ?? 0, mapeamento: texto(l[iMap]),
+    }));
+}
+
+/** Contagem de V (verificado) e P (pendente) na coluna STATUS da aba WP_Lastro. */
+function statusDoLastro(wb: XLSX.WorkBook): { verificados: number; pendentes: number } | null {
+  const nome = wb.SheetNames.find((n) => n.trim().toLowerCase() === "wp_lastro");
+  if (!nome) return null;
+  const { linhas } = linhasDaAba(wb.Sheets[nome]);
+  const iCab = linhas.slice(0, 40).findIndex((l) => l.some((v) => String(v ?? "").trim().toUpperCase() === "ID_BASE"));
+  if (iCab < 0) return null;
+  const iStatus = linhas[iCab].findIndex((v) => String(v ?? "").trim().toUpperCase() === "STATUS");
+  if (iStatus < 0) return null;
+  const status = linhas.slice(iCab + 1).map((l) => texto(l[iStatus]).toUpperCase());
+  return { verificados: status.filter((s) => s === "V").length, pendentes: status.filter((s) => s === "P").length };
 }
 
 export function resumoWorkpaper(wp: Workpaper) {
@@ -156,6 +207,11 @@ export interface Posicao {
   grupo: string;
   /** nome da coluna de onde veio cada valor/data no arquivo da carteira (para mostrar a origem na comparação) */
   colunas?: Partial<Record<CampoDaCarteira, string>>;
+  /** recebível: situação no estoque ("A vencer", "Vencido"…) e provisão para perda (centavos) */
+  situacao?: string;
+  valorPdd?: number | null;
+  /** data de referência do estoque (DATA_REFERENCIA) */
+  dataReferencia?: string | null;
 }
 
 export type CampoDaCarteira = "valorAplicado" | "valorNominal" | "valorPresente" | "dataEmissao" | "dataVencimento" | "dataAquisicao";
@@ -281,6 +337,9 @@ const COLUNAS_RECEBIVEIS: Record<string, string[]> = {
   dataEmissao: ["data emissao", "data de emissao", "dt emissao"],
   dataVencimento: ["data vencimento original", "data vencimento", "data de vencimento", "dt vencimento", "data vencimento ajustada"],
   dataAquisicao: ["data aquisicao", "data de aquisicao", "dt aquisicao"],
+  situacao: ["situacao recebivel", "situacao do recebivel", "situacao"],
+  pdd: ["valor pdd", "vl pdd", "pdd"],
+  dataReferencia: ["data referencia", "data de referencia", "dt referencia"],
 };
 
 function colunasDeRecebiveis(cabecalho: Linha): Map<string, number> | null {
@@ -328,6 +387,7 @@ export function recebiveisDaTabela(linhas: Linha[], primeira = 1): Posicao[] {
       valorAplicado: valor, valorNominal: nominal, valorPresente: paraCentavos(col("valorPresente")),
       dataAquisicao: paraData(col("dataAquisicao")), dataEmissao: paraData(col("dataEmissao")),
       dataVencimento: paraData(col("dataVencimento")), grupo: tipo,
+      situacao: texto(col("situacao")), valorPdd: paraCentavos(col("pdd")), dataReferencia: paraData(col("dataReferencia")),
       colunas: {
         valorAplicado: nomeColuna(aquisicao !== null ? "valorAquisicao" : "valorNominal"), valorNominal: nomeColuna("valorNominal"),
         valorPresente: nomeColuna("valorPresente"), dataEmissao: nomeColuna("dataEmissao"),

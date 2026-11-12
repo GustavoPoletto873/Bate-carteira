@@ -143,9 +143,21 @@ export function Conferencia() {
       }
 
       setProgresso({ atual: 1, total: 1, texto: "Conferindo" });
+      // estoque completo (amostra como carteira): só para a validação da carteira
+      let estoque: { posicoes: ReturnType<typeof lerCarteira>; origem: string } | undefined;
+      if (p.estoque) {
+        setProgresso({ atual: 0, total: 0, texto: "Lendo o estoque para validar a carteira" });
+        try {
+          const arq = await p.estoque.obter();
+          estoque = { posicoes: lerCarteira(arq.bytes, arq.nome), origem: p.estoque.rotulo };
+        } catch (e) {
+          avisos.push(`Não consegui ler o estoque para validar a carteira (${mensagem(e)}).`);
+        }
+      }
+
       const r = montarResultado({
         workpaper: p.workpaper, posicoes, docs, ignorados, dataBase: p.dataBase, fonteBritech: p.carteira.rotulo,
-        pastaLastro: p.lastro.nome, avisos, cdi, arquivos,
+        pastaLastro: p.lastro.nome, avisos, cdi, arquivos, estoque,
       });
       setResultado(r);
       requestAnimationFrame(() => document.getElementById("resultado")?.scrollIntoView({ behavior: "smooth" }));

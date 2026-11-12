@@ -19,7 +19,15 @@ export interface StatusServidor {
   britech: { configurada: boolean; url: string; administradoras: { adm: string; nome: string }[] };
   /** administradoras com a API SOAP do Fromtis configurada (estoque de recebíveis) */
   fromtis?: { administradoras: { adm: string; nome: string }[] };
+  /** administradoras com o Sinqia configurado (posição da carteira) */
+  sinqia?: { administradoras: { adm: string; nome: string }[] };
+  /** o app consegue ler o board de lastro do Monday */
+  monday?: { configurado: boolean };
 }
+
+/** Fundo no board de lastro do Monday e o que o app faz com ele. */
+export interface FundoMonday { nome: string; adm: string; sistema: string; carteira: string; grupo: string }
+export interface PapelDoFundo { fonte: "britech" | "sinqia" | "arquivo" | "fora"; aviso: string }
 
 const CHAVE = "lastro:chave-acesso";
 
@@ -78,6 +86,8 @@ export const servidor = {
   carteirasBritech: (cnpj: string, adm?: string) =>
     json<{ carteiras: CarteiraBritech[]; falhas: { adm: string; erro: string }[] }>(`/api/britech/carteiras?${q({ cnpj, adm })}`),
   composicaoBritech: (adm: string, id: string, data: string) => bytes(`/api/britech/composicao?${q({ adm, id, data })}`),
+  fundoMonday: (cnpj: string) => json<{ configurado: boolean; fundo: FundoMonday | null; papel: PapelDoFundo | null }>(`/api/monday/fundo?${q({ cnpj })}`),
+  carteiraSinqia: (adm: string, carteira: string, data: string) => bytes(`/api/sinqia/carteira?${q({ adm, carteira, data })}`),
   estoqueFromtis: (adm: string, cnpj: string, data: string) => bytes(`/api/fromtis/estoque?${q({ adm, cnpj, data })}`),
   cdi: (de: string, ate: string) => json<{ pontos: PontoCdi[] }>(`/api/indices/cdi?${q({ de, ate })}`),
 };

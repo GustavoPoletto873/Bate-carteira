@@ -7,7 +7,8 @@ import { opcoesDeCarteira, type OpcaoCarteira } from "@/lib/lastro/carteiras";
 import type { Administradora, ProvedorDrive } from "@/lib/lastro/drive-comum";
 import { lerWorkpaper, type Workpaper } from "@/lib/lastro/planilhas";
 import {
-  servidor, type ArquivoDeRecebiveis, type CarteiraFormatada, type FundoDrive, type PastaLastro, type StatusServidor,
+  servidor, type ArquivoDeRecebiveis, type CarteiraFormatada, type FundoDrive, type FundoMonday, type PapelDoFundo, type PastaLastro,
+  type StatusServidor,
 } from "@/lib/lastro/servidor-cliente";
 import { fmtData, normalizar } from "@/lib/lastro/textos";
 import { cn } from "@/lib/utils";
@@ -100,7 +101,13 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
   const [wpErro, setWpErro] = useState("");
   const [carregandoWp, setCarregandoWp] = useState(false);
   const [dataBase, setDataBase] = useState("");
-  const [modoCarteira, setModoCarteira] = useState<"api" | "drive" | "fromtis">(status.britech.configurada ? "api" : "drive");
+  const [modoCarteira, setModoCarteira] = useState<"api" | "drive" | "fromtis" | "sinqia">(status.britech.configurada ? "api" : "drive");
+  // Monday: administradora, sistema e carteira do fundo (de onde buscar a carteira)
+  const [monday, setMonday] = useState<{ fundo: FundoMonday | null; papel: PapelDoFundo | null; erro: string } | null>(null);
+  // Sinqia (posição da carteira; Azumi)
+  const admsSinqia = useMemo(() => status.sinqia?.administradoras ?? [], [status.sinqia]);
+  const [escolhaSinqia, setEscolhaSinqia] = useState("");
+  const [carteiraSinqia, setCarteiraSinqia] = useState("");
   // Fromtis (API SOAP de estoque): a administradora padrão é a da pasta escolhida no Drive (AZUMI, FINVEST, LIMINE…)
   const admsFromtis = useMemo(() => status.fromtis?.administradoras ?? [], [status.fromtis]);
   const [escolhaFromtis, setEscolhaFromtis] = useState("");
@@ -182,14 +189,24 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
    * Fundo de recebíveis (WP_Termo com sacado/cedente) com amostra no Drive começa na amostra.
    */
   async function buscarCarteiras(v: number, cnpj: string, data: string, nomeFundo: string, deRecebiveis: boolean) {
-    const [fmt, rec, api] = await Promise.allSettled([
+    const [fmt, rec, api, mon] = await Promise.allSettled([
       provedor.carteiraFormatada(baseAplicada, cnpj, data || null),
       provedor.amostrasEstoques(baseAplicada, nomeFundo, cnpj),
       status.britech.configurada
         ? servidor.carteirasBritech(cnpj)
         : Promise.reject(new Error(motivoSemBritech)),
+      status.monday?.configurado ? servidor.fundoMonday(cnpj) : Promise.resolve(null),
     ]);
     if (v !== vez.current) return;
+    const noMonday = mon.status === "fulfilled" && mon.value ? mon.value : null;
+    setMonday(mon.status === "fulfilled" ? (noMonday ? { fundo: noMonday.fundo, papel: noMonday.papel, erro: "" } : null) : { fundo: null, papel: null, erro: mensagem(mon.reason) });
+    const fundoMon = noMonday?.fundo ?? null;
+    const fonteMon = noMonday?.papel?.fonte;
+    // Sinqia: carteira do Monday (ou os 8 primeiros dígitos do CNPJ, como nos fundos da Azumi)
+    setCarteiraSinqia(fundoMon?.carteira || cnpj.slice(0, 8));
+    const admSinqia = admsSinqia.find((a) => a.adm === (fundoMon?.adm ?? "").toUpperCase());
+    if (admSinqia) setEscolhaSinqia(admSinqia.adm);
+    const preferirSinqia = fonteMon === "sinqia" && !!admSinqia && !deRecebiveis;
     const arquivo = fmt.status === "fulfilled" ? fmt.value : null;
     const lista = rec.status === "fulfilled" ? rec.value : [];
     setFormatada(arquivo);
@@ -201,14 +218,17 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
     if (api.status === "fulfilled") {
       const { opcoes, padrao } = opcoesDeCarteira(api.value.carteiras, arquivo?.idCarteira);
       setCarteiras({ lista: opcoes, erro: opcoes.length ? "" : "Nenhuma Britech configurada tem carteira para este CNPJ." });
-      setIdCarteira(padrao);
+      // a carteira do Monday manda, se a Britech a devolveu
+      setIdCarteira(fundoMon?.carteira && opcoes.some((o) => o.id === fundoMon.carteira) ? fundoMon.carteira : padrao);
       const falhas = api.value.falhas.map((f) => f.adm).join(", ");
       setAvisoBritech(!opcoes.length && falhas ? `Não consegui consultar: ${falhas}.` : "");
-      setModoCarteira(preferirDrive ? "drive" : preferirFromtis ? "fromtis" : !opcoes.length && temNoDrive ? "drive" : "api");
+      setModoCarteira(preferirDrive ? "drive" : preferirSinqia ? "sinqia" : preferirFromtis ? "fromtis"
+        : (!opcoes.length || fonteMon === "arquivo") && temNoDrive ? "drive" : "api");
     } else {
       setCarteiras({ lista: [], erro: mensagem(api.reason) });
-      setIdCarteira(arquivo?.idCarteira ?? "");
-      if (preferirFromtis) setModoCarteira("fromtis");
+      setIdCarteira(arquivo?.idCarteira ?? fundoMon?.carteira ?? "");
+      if (preferirSinqia) setModoCarteira("sinqia");
+      else if (preferirFromtis) setModoCarteira("fromtis");
       else if (temNoDrive) setModoCarteira("drive");
     }
   }
@@ -225,6 +245,7 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
     setFormatada(undefined);
     setRecebiveis(undefined);
     setArquivoSel("");
+    setMonday(null);
     setPastas(null);
     setPastaSel("");
     setLastro(null);
@@ -273,12 +294,15 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
     })),
   ];
   const noDrive = opcoesDrive.find((o) => o.caminho === arquivoSel) ?? opcoesDrive[0];
+  const estoqueNoDrive = (recebiveis ?? []).find((r) => r.tipo === "estoque");
   const procurandoNoDrive = formatada === undefined || recebiveis === undefined;
   const cnpjFundo = wp?.cnpj || fundo?.cnpj || "";
   const admFromtis = admsFromtis.find((a) => a.adm === escolhaFromtis) ?? admsFromtis.find((a) => a.adm === admFromtisDaPasta) ?? admsFromtis[0];
+  const admSinqia = admsSinqia.find((a) => a.adm === escolhaSinqia) ?? admsSinqia[0];
   const carteiraPronta = modoCarteira === "api" ? !!(idCarteira && dataEf && status.britech.configurada)
     : modoCarteira === "fromtis" ? !!(admFromtis && dataEf && cnpjFundo.length === 14)
-      : !!noDrive;
+      : modoCarteira === "sinqia" ? !!(admSinqia && dataEf && carteiraSinqia)
+        : !!noDrive;
   const lastroPronto = !!lastro && lastro.pasta === pastaSel && !lastro.erro;
   const preparo: Preparo | null = wp && lastroPronto && carteiraPronta && lastro ? {
     workpaper: wp,
@@ -291,6 +315,14 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
           nome: `carteira_${idCarteira}_${dataEf}.xlsx`,
         }),
       }
+      : modoCarteira === "sinqia"
+        ? {
+          rotulo: `Sinqia ${admSinqia!.nome} — carteira ${carteiraSinqia} em ${fmtData(dataEf)}`,
+          obter: async () => ({
+            bytes: await servidor.carteiraSinqia(admSinqia!.adm, carteiraSinqia, dataEf!),
+            nome: `sinqia_${carteiraSinqia}_${dataEf}.csv`,
+          }),
+        }
       : modoCarteira === "fromtis"
         ? {
           rotulo: `Fromtis ${admFromtis!.nome} — estoque do CNPJ ${fmtCnpj(cnpjFundo)} em ${fmtData(dataEf)}`,
@@ -304,6 +336,10 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
           obter: async () => ({ bytes: await provedor.arquivo(noDrive!.caminho), nome: noDrive!.arquivo }),
         },
     lastro: { nome: nomePasta, obter: async () => lastro.arquivos },
+    // carteira = amostra: o estoque do Drive (se houver) entra só para validar a carteira
+    estoque: modoCarteira === "drive" && noDrive?.tipo === "amostra" && estoqueNoDrive
+      ? { rotulo: estoqueNoDrive.caminho.replace(/^pasta:/, ""), obter: async () => ({ bytes: await provedor.arquivo(estoqueNoDrive.caminho), nome: estoqueNoDrive.arquivo }) }
+      : undefined,
   } : null;
 
   const nomeCarteira = opcaoCarteira?.nome;
@@ -343,6 +379,17 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
               </div>
             </div>
           )}
+          {wp && monday?.fundo && (
+            <p className="text-xs text-creme/60" data-campo="monday">
+              Monday: <span className="text-creme/85">{monday.fundo.adm || "—"}</span> · {monday.fundo.sistema || "sistema não informado"}
+              {monday.fundo.carteira ? <> · carteira <span className="tabular-nums text-creme/85">{monday.fundo.carteira}</span></> : null}
+            </p>
+          )}
+          {wp && monday?.papel?.aviso && <p className={cn("text-xs", monday.papel.fonte === "fora" ? "text-erro" : "text-aviso")}>{monday.papel.aviso}</p>}
+          {wp && monday?.erro && <p className="text-xs text-aviso">Monday: {monday.erro}</p>}
+          {wp && monday === null && status.monday?.configurado && !carregandoWp && carteiras && (
+            <p className="text-xs text-creme/45">Fundo não encontrado no board do Monday.</p>
+          )}
           {wp && <CampoDataBase valor={dataBase} onMudar={mudarData} />}
         </Cartao>
 
@@ -353,6 +400,8 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
           pronto={!!wp && carteiraPronta}
           descricao={modoCarteira === "api"
             ? <>Composição da carteira na data-base, direto da API da Britech da administradora, achada pelo CNPJ.</>
+            : modoCarteira === "sinqia"
+              ? <>Posição da carteira na data-base pelo Sinqia da administradora (o mesmo do boleta_sinqia), com o código da carteira do Monday.</>
             : modoCarteira === "fromtis"
               ? <>Estoque de direitos creditórios do fundo na data-base, pela API do Fromtis da administradora (o mesmo do hub).</>
               : <>Do Drive: a carteira Britech já baixada (<code className="text-creme/80">_Carteiras\FORMATADA</code>) ou, nas administradoras sem Britech, a amostra (<code className="text-creme/80">_Amostra</code>) ou o estoque (<code className="text-creme/80">_Insumos</code>) do fundo.</>}
@@ -366,6 +415,7 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
             opcoes={[
               { valor: "api", rotulo: "API Britech" },
               { valor: "drive", rotulo: "Arquivo no Drive" },
+              ...(admsSinqia.length ? [{ valor: "sinqia" as const, rotulo: "Sinqia" }] : []),
               ...(admsFromtis.length ? [{ valor: "fromtis" as const, rotulo: "Fromtis" }] : []),
             ]}
           />
@@ -395,6 +445,27 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
                 {idCarteira && <p className="text-xs text-creme/55">Carteira {idCarteira}{nomeCarteira ? ` (${nomeCarteira})` : ""}{opcaoCarteira?.admNome ? ` na Britech ${opcaoCarteira.admNome}` : ""} em {fmtData(dataEf)} — baixada ao conferir.</p>}
               </div>
             )
+          ) : modoCarteira === "sinqia" ? (
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                {admsSinqia.length > 1 && (
+                  <select value={admSinqia?.adm ?? ""} onChange={(e) => { onMudar(); setEscolhaSinqia(e.target.value); }} className={classeSelect} aria-label="Sinqia da administradora">
+                    {admsSinqia.map((a) => <option key={a.adm} value={a.adm}>{a.nome}</option>)}
+                  </select>
+                )}
+                <input
+                  value={carteiraSinqia}
+                  onChange={(e) => { onMudar(); setCarteiraSinqia(e.target.value.replace(/\D/g, "")); }}
+                  placeholder="Código da carteira no Sinqia"
+                  className={classeSelect}
+                  aria-label="Código da carteira no Sinqia"
+                />
+              </div>
+              <p className="text-xs text-creme/55">
+                Posição da carteira {carteiraSinqia || "—"} em {fmtData(dataEf)} no Sinqia da {admSinqia?.nome} — títulos de renda fixa
+                (os direitos creditórios vêm só em totais; por recebível, use a amostra/estoque).
+              </p>
+            </div>
           ) : modoCarteira === "fromtis" ? (
             <div className="space-y-2">
               {admsFromtis.length > 1 && (

@@ -8,6 +8,8 @@ export interface Preparo {
   dataBase: string | null;
   carteira: { rotulo: string; obter: () => Promise<{ bytes: Uint8Array; nome: string }> };
   lastro: { nome: string; obter: () => Promise<ArquivoEntrada[]> };
+  /** estoque completo do fundo (só para validar a carteira quando a carteira conferida é a amostra) */
+  estoque?: { rotulo: string; obter: () => Promise<{ bytes: Uint8Array; nome: string }> };
 }
 
 export interface PropsFontes {

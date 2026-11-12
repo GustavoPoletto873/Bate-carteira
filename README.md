@@ -80,6 +80,35 @@ Como a duplicata traz as datas em tabela, longe do rótulo, a data exata num doc
 não estiver lá, o app mostra a data mais próxima do documento e a diferença em dias. Documento que só cita o cedente
 deixa o sacado "Verificar". A WP_Termo continua conferida pelo valor de aquisição.
 
+### De onde vem a carteira de cada fundo (Monday)
+
+Com `MONDAY_API_TOKEN`, o app procura o CNPJ no board de lastro do Monday e mostra a **administradora**, o **sistema**
+e o código da **carteira**, e usa isso para escolher a fonte:
+
+| No Monday | Carteira no app |
+|---|---|
+| Britech (ID, Planner…) | API Britech, com a carteira do Monday |
+| Sinqia (Azumi) | Sinqia (posição da carteira); por recebível, amostra/estoque |
+| Intra, Limine, Finvest | a administradora envia a carteira: validação pela aba carteiraInforme do WP + estoque do Drive |
+| MAPS | só pela VPN (máquina com acesso); use o arquivo |
+| AMPLIS | sem integração; use o arquivo |
+| QI Tech, BlueWave | só validação de estoque — fora do escopo do app (as pastas nem aparecem na lista) |
+
+### Validação da carteira (como a aba CVM do workpaper)
+
+Quando o workpaper tem a aba **carteiraInforme** (a carteira enviada pela administradora, classificada nas categorias
+do informe da CVM), o resultado traz a mesma validação da aba CVM: composição da carteira e soma das categorias × PL;
+**carteira × estoque** (DC vincendos e vencidos × soma do valor presente do estoque por situação, PDD × `VALOR_PDD`,
+tolerância de R$ 1,00); a **amostra** da WP_Termo por categoria (coluna "Amostra") com a representatividade no PL; e a
+contagem V/P da WP_Termo e da WP_Lastro. Se a carteira conferida é a amostra, o app lê também o estoque do Drive só para
+essa validação. Aba **Validação da carteira** no Excel.
+
+### Posição da carteira pelo Sinqia
+
+`SINQIA_<ADM>_URL`, `_TOKEN_URL`, `_USUARIO` e `_SENHA`: token no Keycloak e
+`/api/v1/carteiras/{carteira}/relatorios/posicao/carteirac` (o mesmo do boleta_sinqia). A posição traz os títulos de
+renda fixa; os direitos creditórios vêm só em totais.
+
 ### Estoque pelo Fromtis (API SOAP)
 
 Para as administradoras com o webservice do Fromtis (Azumi, Finvest, Limine, FIDD — o mesmo que o hub usa em
@@ -140,6 +169,8 @@ Veja `.env.example`.
 | `BRITECH_USUARIO`, `BRITECH_SENHA` | credenciais da API da Britech (segredo) |
 | `BRITECH_URL` | padrão `https://delta.britech.com.br/WS/api` (Britech da Planner) |
 | `BRITECH_<ADM>_URL`, `_USUARIO`, `_SENHA` | Britech de cada administradora (ID, INTRA, FINVEST, ATIVA, AMERICA, VERT, MFPEPPER, RJI, GUIDE…), gerados por `scripts/importar-acessos-britech.mjs` (segredo) |
+| `MONDAY_API_TOKEN` (e `LASTRO_MONDAY_BOARD`) | ler o board de lastro do Monday: administradora, sistema e carteira de cada fundo (segredo) |
+| `SINQIA_<ADM>_URL`, `_TOKEN_URL`, `_USUARIO`, `_SENHA` | posição da carteira pelo Sinqia da administradora (segredo) |
 | `FROMTIS_<ADM>_URL`, `_USUARIO`, `_SENHA` | webservice do Fromtis de cada administradora, para o estoque de recebíveis (segredo) |
 | `LASTRO_DRIVE_BASE` | pasta do trimestre no Drive |
 | `LASTRO_DRIVE_RAIZES` | raízes que o servidor pode ler (padrão `G:\Drives compartilhados`) |
