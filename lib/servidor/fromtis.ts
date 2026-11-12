@@ -41,6 +41,13 @@ const PAUSA_MS = 15 * 60 * 1000;
 const pausadas = new Map<string, { ate: number; erro: string }>();
 export const limparPausasFromtis = () => pausadas.clear();
 
+/** Login recusado: pausa a administradora e devolve o erro. */
+function recusado(inst: InstanciaFromtis, detalhe: string): ErroFromtis {
+  const erro = `O Fromtis da ${inst.nome} recusou o usuário e a senha (${detalhe}). Confira FROMTIS_${inst.adm}_USUARIO e _SENHA`;
+  pausadas.set(inst.adm, { ate: Date.now() + PAUSA_MS, erro });
+  return new ErroFromtis(erro);
+}
+
 const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const tag = (xml: string, nome: string) => xml.match(new RegExp(`<(?:\\w+:)?${nome}>([\\s\\S]*?)</(?:\\w+:)?${nome}>`))?.[1]?.trim() ?? "";
 
@@ -74,10 +81,11 @@ async function soap(inst: InstanciaFromtis, servico: string, xml: string, multip
       await espera(2000 * 2 ** tentativa);
       continue;
     }
-    if (r.status === 401 || r.status === 403) {
-      const erro = `O Fromtis da ${inst.nome} recusou o usuário e a senha (HTTP ${r.status}). Confira FROMTIS_${inst.adm}_USUARIO e _SENHA`;
-      pausadas.set(inst.adm, { ate: Date.now() + PAUSA_MS, erro });
-      throw new ErroFromtis(erro);
+    if (r.status === 401 || r.status === 403) throw recusado(inst, `HTTP ${r.status}`);
+    if (r.status === 500) {
+      // senha errada vem como SOAP Fault (HTTP 500), não como 401: também pausa, para não bloquear o usuário
+      const fault = tag(await r.clone().text().catch(() => ""), "faultstring");
+      if (/bad credentials|erro de autentica/i.test(fault)) throw recusado(inst, fault);
     }
     if (!r.ok && r.status !== 500) throw new ErroFromtis(`O Fromtis da ${inst.nome} respondeu HTTP ${r.status}.`);
     return r;
