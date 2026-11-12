@@ -6,7 +6,7 @@
  * Caminhos de arquivo/pasta neste provedor são "pasta:<caminho relativo à pasta escolhida>".
  */
 import {
-  interpretarWorkpaper, ordenarFundos, ordenarPastas, procurarAmostrasEstoques, SUBPASTAS, type Administradora,
+  foraDoApp, interpretarWorkpaper, ordenarFundos, ordenarPastas, procurarAmostrasEstoques, SUBPASTAS, type Administradora,
   type CarteiraFormatada, type FundoDrive, type ProvedorDrive,
 } from "./drive-comum";
 import { listarPasta, type HandleArquivo, type HandlePasta } from "./fontes";
@@ -44,7 +44,7 @@ export async function administradorasNaPasta(raiz: HandlePasta): Promise<Adminis
   if (await temWorkpapers(raiz)) return [{ nome: raiz.name, base: "" }];
   const lista: Administradora[] = [];
   for (const h of await filhos(raiz)) {
-    if (h.kind === "directory" && (await temWorkpapers(h))) lista.push({ nome: h.name, base: h.name });
+    if (h.kind === "directory" && !foraDoApp(h.name) && (await temWorkpapers(h))) lista.push({ nome: h.name, base: h.name });
   }
   return lista.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 }

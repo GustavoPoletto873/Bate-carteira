@@ -121,6 +121,9 @@ describe("pasta do trimestre com várias administradoras", () => {
       "_Lastro e Termo": { "FUNDO BETA": { "termo.pdf": "%PDF-id" } },
     },
     ATIVA: {},
+    // QI Tech: só validação de estoque, fora do app (não entra na lista mesmo com _Workpapers)
+    "QI TECH": { _Workpapers: { "WP_FUNDO QI_55666777000188.xlsm": "wp-qi" } },
+    BLUEWAVE: { _workpapers: { "WP_FUNDO BW_66777888000199.xlsm": "wp-bw" } },
     "anotacoes.txt": "x",
   });
   const drive = criarProvedorPasta(TRIMESTRE);

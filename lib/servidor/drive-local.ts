@@ -7,7 +7,7 @@ import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import {
-  interpretarWorkpaper, ordenarFundos, ordenarPastas, procurarAmostrasEstoques, SUBPASTAS, type Administradora,
+  foraDoApp, interpretarWorkpaper, ordenarFundos, ordenarPastas, procurarAmostrasEstoques, SUBPASTAS, type Administradora,
   type ArquivoDeRecebiveis, type CarteiraFormatada, type FundoDrive,
 } from "../lastro/drive-comum";
 import { ehCarteiraDoFundo, pastaDaData } from "../lastro/planilhas";
@@ -95,7 +95,7 @@ export async function listarAdministradoras(base: string): Promise<Administrador
   const lista: Administradora[] = [];
   for (const e of await readdir(trimestre, { withFileTypes: true })) {
     const p = path.join(trimestre, e.name);
-    if (e.isDirectory() && (await temWp(p))) lista.push({ nome: e.name, base: p });
+    if (e.isDirectory() && !foraDoApp(e.name) && (await temWp(p))) lista.push({ nome: e.name, base: p });
   }
   return lista.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 }

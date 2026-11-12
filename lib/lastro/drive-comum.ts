@@ -2,7 +2,11 @@
  * Regras comuns aos dois jeitos de ler o Drive: o G: pelo servidor (rotas /api, no seu computador) e a pasta
  * escolhida no navegador de quem usa (File System Access). Funções puras.
  */
-import { palavras } from "./textos";
+import { normalizar, palavras } from "./textos";
+
+/** Administradoras fora do escopo do app (QI Tech e BlueWave: só validação de estoque). */
+const FORA_DO_APP = ["qi tech", "bluewave", "blue wave"];
+export const foraDoApp = (nome: string) => FORA_DO_APP.includes(normalizar(nome));
 
 /** Pasta do trimestre/administrador (pode ser trocada na tela e por LASTRO_DRIVE_BASE). */
 export const DRIVE_BASE_PADRAO =

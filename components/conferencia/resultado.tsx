@@ -10,6 +10,7 @@ import { pendenciasDaLinha, resumirParaTela } from "@/lib/lastro/resumo";
 import { cn } from "@/lib/utils";
 import { BaterPdf } from "./bater-pdf";
 import { Alternador } from "./comum";
+import { ValidacaoDaCarteira } from "./validacao";
 import { corDoStatus, Status } from "./status";
 
 const ORDEM: Situacao[] = ["Divergente", "Só no WP", "Verificar", "Provável", "OK", "Sem documentos"];
@@ -405,6 +406,8 @@ export function Resultado({ resultado, onBaixar, baixando }: {
       {r.avisos.length > 0 && (
         <div className="space-y-1 text-sm">{r.avisos.map((a) => <p key={a} className="text-aviso">⚠ {a}</p>)}</div>
       )}
+
+      {r.validacao && <ValidacaoDaCarteira v={r.validacao} />}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="sm:w-80">

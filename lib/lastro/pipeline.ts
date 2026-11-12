@@ -1,6 +1,7 @@
 /** Junta as etapas: documentos da pasta → análise → conferência → resultado para a tela e o Excel. */
 import { camposDe, conferir, recortarPelaWp, TOLERANCIA_CENTAVOS, unicos, type ResultadoConferencia, type Situacao } from "./conciliacao";
 import type { PontoCdi } from "./indexadores";
+import { ehEstoque, validarCarteira, type ValidacaoCarteira } from "./validacao-carteira";
 import { analisar, documentoComErro, type Documento } from "./documentos";
 import { classificar, extrairTexto, type PdfJs } from "./extratores";
 import type { Posicao, Workpaper } from "./planilhas";
@@ -76,6 +77,8 @@ export interface ResultadoCompleto extends ResultadoConferencia {
   abrir?: (caminho: string) => Promise<Uint8Array>;
   ignorados: { nome: string; motivo: string }[];
   avisos: string[];
+  /** validação da carteira como a aba CVM do workpaper (null se o WP não tem a aba carteiraInforme) */
+  validacao: ValidacaoCarteira | null;
 }
 
 export function montarResultado(args: {
@@ -85,8 +88,15 @@ export function montarResultado(args: {
   cdi?: PontoCdi[];
   /** arquivos da pasta de lastro, para o visualizador abrir o documento */
   arquivos?: ArquivoEntrada[];
+  /** estoque completo, só para validar a carteira quando a carteira conferida é a amostra */
+  estoque?: { posicoes: Posicao[]; origem: string };
 }): ResultadoCompleto {
   const { workpaper, docs, ignorados } = args;
+  // a carteira conferida já é o estoque inteiro? senão, o estoque extra (se houver)
+  const estoqueValidacao = ehEstoque(args.posicoes)
+    ? { posicoes: args.posicoes, origem: `a própria carteira conferida (${args.fonteBritech})` }
+    : args.estoque;
+  const validacao = validarCarteira(workpaper, estoqueValidacao?.posicoes ?? null, estoqueValidacao?.origem ?? "");
   const { posicoes, aviso } = recortarPelaWp(args.posicoes, workpaper.linhas);
   const conferencia = conferir(posicoes, workpaper.linhas, docs, workpaper.cnpj, TOLERANCIA_CENTAVOS, {
     dataBase: args.dataBase, cdi: args.cdi,
@@ -96,7 +106,7 @@ export function montarResultado(args: {
   const avisos = [...(args.avisos ?? []), ...(aviso ? [aviso] : [])];
   if (!docs.length) avisos.push("A pasta de lastro e termo não tem documentos legíveis (PDF, HTML, DOCX ou TXT).");
   return {
-    ...conferencia, ignorados, avisos, docs,
+    ...conferencia, ignorados, avisos, docs, validacao,
     abrir: porCaminho.size ? async (caminho) => {
       const ler = porCaminho.get(caminho);
       if (!ler) throw new Error(`Arquivo não encontrado na pasta: ${caminho}`);
@@ -120,6 +130,7 @@ const CORES: Record<string, string> = {
   Provável: "FFDDEBF7", igual: "FFC6EFCE", "campo diferente": "FFDDEBF7", "sem rótulo": "FFDDEBF7", aproximado: "FFFFEB9C",
   calculado: "FFDDEBF7",
   Verificar: "FFFFEB9C", "Não localizado": "FFEDEDED", "Sem documentos": "FFEDEDED",
+  VERIFICAR: "FFFFC7CE", "SEM DADOS": "FFEDEDED",
 };
 
 export async function gerarExcel(r: ResultadoCompleto): Promise<ArrayBuffer> {
@@ -190,6 +201,22 @@ export async function gerarExcel(r: ResultadoCompleto): Promise<ArrayBuffer> {
     c.documento.rotulo || "(sem rótulo)", c.documento.valor, c.detalhe, c.documento.trecho])),
   { Ativo: 45, Recebível: 30, "Coluna da carteira": 24, Documento: 50, "Rótulo no documento": 30, Detalhe: 80, "Trecho do documento": 100 },
   ["Situação", "Relação"]);
+
+  const v = r.validacao;
+  if (v) {
+    const reais = (c: number | null) => (c === null ? "" : c / 100);
+    const pct = (x: number | null) => (x === null ? "" : Math.round(x * 10000) / 100);
+    aba("Validação da carteira", ["Bloco", "Item", "Carteira (R$)", "Estoque / Amostra (R$)", "Diferença (R$)", "Quantidade", "% do PL", "Status"], [
+      ...v.composicao.map((c) => ["Composição da carteira", c.categoria, reais(c.valor), "", "", "", pct(c.pctPl), ""]),
+      ...v.foraDasCategorias.map((c) => ["Composição da carteira", `(fora das categorias) ${c.mapeamento}`, reais(c.valor), "", "", "", "", "VERIFICAR"]),
+      ["Composição da carteira", "Patrimônio líquido × soma das categorias", reais(v.pl), reais(v.somaCategorias), v.pl === null ? "" : reais(v.pl - v.somaCategorias), "", "", v.statusPl],
+      ...v.estoque.map((e) => ["Carteira × estoque", e.item, reais(e.carteira), reais(e.estoque), reais(e.diferenca), e.quantidade, "", e.status]),
+      ...(v.estoque.length ? [] : [["Carteira × estoque", v.origemEstoque, "", "", "", "", "", "SEM DADOS"]]),
+      ...(v.avisoEstoque ? [["Carteira × estoque", v.avisoEstoque, "", "", "", "", "", "VERIFICAR"]] : []),
+      ...v.amostra.map((a) => ["Amostra (WP_Termo)", a.categoria, "", reais(a.valor), "", a.quantidade, pct(a.pctPl), ""]),
+      ...v.verificacao.map((x) => ["Verificação de lastro", x.item, "", "", "", x.total, x.total ? pct(x.verificados / x.total) : "", `${x.verificados} V · ${x.pendentes} P`]),
+    ], { Bloco: 24, Item: 52 }, ["Status"]);
+  }
 
   aba("Documentos", ["Arquivo", "Tipo", "Páginas lidas", "Cita o CNPJ do fundo", "Ligado a", "Observação"], [
     ...r.documentos.map((d) => [d.caminho, d.tipo, d.paginas, d.citaCnpjFundo ? "Sim" : "Não", d.vinculos.join("\n"), d.observacao]),
