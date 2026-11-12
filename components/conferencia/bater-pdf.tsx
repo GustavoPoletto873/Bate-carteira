@@ -206,14 +206,19 @@ function GradeVinculo({ linha, doc, pagina, campos, onVincular }: {
  * Bater PDF: busca em todos os documentos lidos, visualizador com o termo destacado e vínculo da pendência ao
  * documento, campo a campo (como no bate-lastro).
  */
-export function BaterPdf({ resultado, linha, campos, termoInicial, onVincular, onFechar }: {
+export function BaterPdf({ resultado, linha, campos, termoInicial, docInicial, onVincular, onFechar }: {
   resultado: ResultadoCompleto; linha: LinhaResultado | null; campos: Campos; termoInicial: string;
+  /** abre já neste documento e página (ex.: a evidência clicada no detalhe do título) */
+  docInicial?: { nome: string; pagina: number };
   onVincular: (id: number, v: Vinculo) => void; onFechar: () => void;
 }) {
   const [termo, setTermo] = useState(termoInicial);
   const [consulta, setConsulta] = useState(termoInicial);
   const busca = useMemo(() => buscarNosDocumentos(resultado.docs, consulta), [resultado.docs, consulta]);
-  const [escolha, setEscolha] = useState<{ docId: number; pagina: number } | null>(null);
+  const [escolha, setEscolha] = useState<{ docId: number; pagina: number } | null>(() => {
+    const d = docInicial && resultado.docs.find((x) => x.nome === docInicial.nome);
+    return d ? { docId: d.id, pagina: Math.max(1, docInicial.pagina) } : null;
+  });
   const [totalPaginas, setTotalPaginas] = useState<Record<number, number>>({});
 
   const selecionado = busca.resultados.find((r) => r.doc.id === escolha?.docId) ?? busca.resultados[0] ?? null;

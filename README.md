@@ -46,7 +46,9 @@ O `npm install` também copia o worker e as fontes do pdf.js para `public/pdfjs`
 O resumo tem três blocos, cada um expansível:
 
 - **Precisam de atenção**: divergem dos documentos ou da WP_Termo, ou falta confirmar; uma linha por campo
-  (carteira × documentos), e o porquê em "Detalhes".
+  (carteira × documentos). Em "Detalhes", cada campo mostra o valor da carteira, o porquê numa frase, onde ele aparece
+  (arquivo e página, com "abrir" que leva o Bater PDF direto para lá) e os outros valores que os documentos trazem; as
+  comparações e evidências completas ficam em "Ver todas".
 - **Validados**: conferem em tudo. Os que têm o valor e a data de emissão batendo ficam **validados visualmente** e
   aguardam a aprovação do analista ("Aprovar" ou "Aprovar todos"; dá para desfazer). No Excel, o aprovado sai como
   "OK (aprovado pelo analista)".
