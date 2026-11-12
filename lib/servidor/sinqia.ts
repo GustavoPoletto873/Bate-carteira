@@ -7,8 +7,13 @@
  *
  * Cada administradora: SINQIA_<ADM>_URL (API), SINQIA_<ADM>_TOKEN_URL (…/realms/sinqia/protocol/openid-connect/token),
  * SINQIA_<ADM>_USUARIO e SINQIA_<ADM>_SENHA; opcional SINQIA_<ADM>_CLIENT_ID (padrão "sqfaas").
+ *
+ * Em stand-by: o servidor do Sinqia recusa pedidos vindos da Vercel (firewall), então o app não oferece o Sinqia.
+ * Para usar no computador do escritório, defina LASTRO_SINQIA_ATIVO=1.
  */
 export class ErroSinqia extends Error {}
+
+export const sinqiaAtivo = () => process.env.LASTRO_SINQIA_ATIVO === "1";
 
 export interface InstanciaSinqia { adm: string; nome: string; url: string; tokenUrl: string; clientId: string; usuario: string; senha: string }
 

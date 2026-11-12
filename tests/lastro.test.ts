@@ -174,6 +174,9 @@ describe("planilhas", () => {
 
   it("workpaper sem WP_Termo dá erro amigável", () => {
     expect(() => lerWorkpaper(xlsx([["x"]]), "WP_x.xlsm")).toThrow(/não tem a aba WP_Termo/);
+    // FIC: a aba existe, só com colunas auxiliares e sem a tabela BASE_…
+    expect(() => lerWorkpaper(xlsx([[], [], ["", "", "DataBase", "Prazo", "Amostra"]], "WP_Termo"), "WP_FIC.xlsm")).toThrow(/WP_Termo deste workpaper está vazia/);
+    expect(() => lerWorkpaper(xlsx([["ID_BASE", "BASE_NOME_SACADO"]], "WP_Termo"), "WP_x.xlsm")).toThrow(/Não achei o cabeçalho/);
   });
 
   it("reconhece o arquivo da carteira do fundo na data", () => {

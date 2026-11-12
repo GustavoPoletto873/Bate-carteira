@@ -3,7 +3,7 @@ import { BRITECH_URL, CHAVE_ACESSO, DRIVE_BASE_PADRAO, instanciasBritech } from 
 import { driveDisponivel } from "@/lib/servidor/drive-local";
 import { instanciasFromtis } from "@/lib/servidor/fromtis";
 import { mondayConfigurado } from "@/lib/servidor/monday";
-import { instanciasSinqia } from "@/lib/servidor/sinqia";
+import { instanciasSinqia, sinqiaAtivo } from "@/lib/servidor/sinqia";
 
 /** O que está disponível neste servidor (sem segredos). Sem acesso liberado, só diz que a chave é necessária. */
 export async function GET(req: Request) {
@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   const liberado = verificarAcesso(req) === null;
   const britech = liberado ? instanciasBritech().map((i) => ({ adm: i.adm, nome: i.nome })) : [];
   const fromtis = liberado ? instanciasFromtis().map((i) => ({ adm: i.adm, nome: i.nome })) : [];
-  const sinqia = liberado ? instanciasSinqia().map((i) => ({ adm: i.adm, nome: i.nome })) : [];
+  const sinqia = liberado && sinqiaAtivo() ? instanciasSinqia().map((i) => ({ adm: i.adm, nome: i.nome })) : [];
   return Response.json({
     local,
     exigeChave: !liberado || (!local && !!CHAVE_ACESSO && !!req.headers.get("x-lastro-chave")),

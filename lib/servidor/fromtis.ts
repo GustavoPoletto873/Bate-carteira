@@ -97,7 +97,13 @@ export async function agendarEstoque(inst: InstanciaFromtis, cnpj: string, data:
   const xml = await (await soap(inst, "relatorioEstoque", envelope("agendadorRelatorioEstoque",
     `<requisicaoRelatorioEstoque><cnpjFundo>${cnpj}</cnpjFundo><dataReferencia>${data}</dataReferencia><tipoArquivo>CSV</tipoArquivo></requisicaoRelatorioEstoque>`))).text();
   const erro = erroNoRetorno(xml);
-  if (erro) throw new ErroFromtis(`O Fromtis da ${inst.nome} não agendou o estoque do CNPJ ${cnpj} em ${data}: ${erro}`);
+  if (erro) {
+    // o login passa, mas o usuário não pode usar a API: não é senha errada, é permissão na administradora
+    const dica = /perfil de acesso ao web ?services?/i.test(erro)
+      ? `. O usuário de FROMTIS_${inst.adm}_USUARIO entra no Fromtis, mas não tem o perfil de webservice: peça à ${inst.nome} para habilitar esse perfil ou use um usuário que já o tenha`
+      : "";
+    throw new ErroFromtis(`O Fromtis da ${inst.nome} não agendou o estoque do CNPJ ${cnpj} em ${data}: ${erro}${dica}`);
+  }
   const id = tag(xml, "idAgendamento");
   if (!id) throw new ErroFromtis(`O Fromtis da ${inst.nome} não devolveu o número do agendamento.`);
   return id;

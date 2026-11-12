@@ -5,6 +5,8 @@
  * MONDAY_API_TOKEN (segredo) e, se o board mudar, LASTRO_MONDAY_BOARD. As colunas são as do board "Lastro"
  * (CNPJ, ADM, Sistema, Carteira); dá para trocar por LASTRO_MONDAY_COLUNAS="cnpj,adm,sistema,carteira".
  */
+import { sinqiaAtivo } from "./sinqia";
+
 export class ErroMonday extends Error {}
 
 export interface FundoMonday {
@@ -87,6 +89,9 @@ export function papelDoFundo(f: FundoMonday): { fonte: "britech" | "sinqia" | "a
   }
   if (/MAPS/.test(sistema)) return { fonte: "arquivo", aviso: "Fundo no MAPS: a API só responde pela VPN (máquina do Lucas). Use o arquivo da carteira." };
   if (/AMPLIS/.test(sistema)) return { fonte: "arquivo", aviso: "Fundo no AMPLIS: sem integração. Use o arquivo da carteira." };
-  if (/SINQIA/.test(sistema)) return { fonte: "sinqia", aviso: "" };
+  if (/SINQIA/.test(sistema)) {
+    if (sinqiaAtivo()) return { fonte: "sinqia", aviso: "" };
+    return { fonte: "arquivo", aviso: `Fundo no Sinqia (${f.adm}): a integração está em stand-by. Use a amostra/estoque do Drive ou o arquivo da carteira.` };
+  }
   return { fonte: "britech", aviso: "" };
 }

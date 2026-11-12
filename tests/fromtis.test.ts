@@ -62,6 +62,10 @@ describe("Fromtis SOAP", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("<retornoRelatorioEstoque><messangemRetorno><tipoRetorno>ERRO</tipoRetorno><descricaoRetorno>Fundo não encontrado</descricaoRetorno></messangemRetorno></retornoRelatorioEstoque>")));
     await expect(estoqueFromtis("TESTE", "11222333000181", "2026-06-30")).rejects.toThrow(/Fundo não encontrado/);
 
+    // usuário sem perfil de webservice: diz o que pedir à administradora
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<r><tipoRetorno>ERRO</tipoRetorno><descricaoRetorno>Usuário não tem perfil de acesso ao webServices</descricaoRetorno></r>")));
+    await expect(estoqueFromtis("TESTE", "11222333000181", "2026-06-30")).rejects.toThrow(/FROMTIS_TESTE_USUARIO entra no Fromtis, mas não tem o perfil de webservice/);
+
     const chamadas = vi.fn(async () => new Response("", { status: 401 }));
     vi.stubGlobal("fetch", chamadas);
     await expect(estoqueFromtis("TESTE", "11222333000181", "2026-06-30")).rejects.toThrow(/recusou o usuário e a senha/);
