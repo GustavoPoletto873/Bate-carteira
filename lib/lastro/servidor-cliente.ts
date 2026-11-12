@@ -4,6 +4,7 @@ import type { ItemListado } from "../servidor/drive-local";
 import type {
   Administradora, ArquivoDeRecebiveis, CarteiraFormatada, FundoDrive, PastaLastro, ProvedorDrive,
 } from "./drive-comum";
+import type { PontoCdi } from "./indexadores";
 import type { ArquivoEntrada } from "./pipeline";
 
 export type { ArquivoDeRecebiveis, CarteiraBritech, CarteiraFormatada, FundoDrive, PastaLastro };
@@ -16,6 +17,8 @@ export interface StatusServidor {
   liberado: boolean;
   drive: { disponivel: boolean; base: string };
   britech: { configurada: boolean; url: string; administradoras: { adm: string; nome: string }[] };
+  /** administradoras com a API SOAP do Fromtis configurada (estoque de recebíveis) */
+  fromtis?: { administradoras: { adm: string; nome: string }[] };
 }
 
 const CHAVE = "lastro:chave-acesso";
@@ -75,6 +78,8 @@ export const servidor = {
   carteirasBritech: (cnpj: string, adm?: string) =>
     json<{ carteiras: CarteiraBritech[]; falhas: { adm: string; erro: string }[] }>(`/api/britech/carteiras?${q({ cnpj, adm })}`),
   composicaoBritech: (adm: string, id: string, data: string) => bytes(`/api/britech/composicao?${q({ adm, id, data })}`),
+  estoqueFromtis: (adm: string, cnpj: string, data: string) => bytes(`/api/fromtis/estoque?${q({ adm, cnpj, data })}`),
+  cdi: (de: string, ate: string) => json<{ pontos: PontoCdi[] }>(`/api/indices/cdi?${q({ de, ate })}`),
 };
 
 /** Drive pelo G: do computador onde o servidor do app roda (rotas /api/drive). */

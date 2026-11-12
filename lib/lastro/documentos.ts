@@ -35,6 +35,13 @@ const RE_CNPJ = /(?<!\d)\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}(?!\d)/g;
 
 export interface Achado<T> { valor: T; ini: number; fim: number; trecho: string }
 
+/** Valor ou data do documento com o rótulo que vem antes dele ("valor de aplicação", "data de desembolso"…) e a página. */
+export interface Rotulado<T> extends Achado<T> {
+  /** "" quando não há rótulo perto (ex.: tabela com os rótulos numa linha e os valores em outra) */
+  rotulo: string;
+  pagina: number;
+}
+
 export interface Documento {
   id: number;
   nome: string;
@@ -57,6 +64,11 @@ export interface Documento {
   numerosEmissao: Set<number>;
   cnpjs: Set<string>;
   grupo: string;
+  /** onde começa cada página em `texto` */
+  paginas: number[];
+  /** todos os valores e datas, com rótulo e página (para a comparação com a carteira) */
+  valoresComRotulo: Rotulado<number>[];
+  datasComRotulo: Rotulado<string>[];
 }
 
 let proximoId = 1;
@@ -170,7 +182,7 @@ export function grupoDoNome(nome: string): string {
 
 export function analisar(
   nome: string, textoBruto: string,
-  opcoes: { caminho?: string; tipo?: string; paginasLidas?: number; paginasTotal?: number; aviso?: string } = {},
+  opcoes: { caminho?: string; tipo?: string; paginasLidas?: number; paginasTotal?: number; aviso?: string; paginas?: number[] } = {},
 ): Documento {
   const { norm, original, mapa } = normalizarComMapa(textoBruto);
   const tipo = opcoes.tipo ?? (nome.split(".").pop() ?? "").toUpperCase();
@@ -180,6 +192,7 @@ export function analisar(
     erro: "", aviso: opcoes.aviso ?? "", texto: original, norm, mapa, palavras: palavras(norm),
     valores: [], valoresRotulados: [], datas: [], datasEmissao: [], datasVencimento: [],
     emissoresCitados: [], numerosEmissao: new Set(), cnpjs: new Set(), grupo: grupoDoNome(nome),
+    paginas: paginasNoTexto(textoBruto ?? "", opcoes.paginas), valoresComRotulo: [], datasComRotulo: [],
   };
   if (!temTexto(doc)) {
     doc.erro = tipo === "PDF" ? "sem texto (documento escaneado/imagem: não há OCR)" : "sem texto";
@@ -195,7 +208,68 @@ export function analisar(
   doc.emissoresCitados = emissoresCitados(doc);
   doc.numerosEmissao = numerosDeEmissao(norm);
   doc.cnpjs = new Set([...norm.matchAll(RE_CNPJ)].map((m) => soDigitos(m[0])));
+  doc.valoresComRotulo = valores.slice(0, MAX_ROTULADOS).map((v) => ({
+    valor: v.valor, ini: v.ini, fim: v.fim, trecho: trecho(doc, v.ini, v.fim),
+    rotulo: rotuloAntes(norm, v.ini, CHAVES_VALOR), pagina: paginaDe(doc, v.ini),
+  }));
+  doc.datasComRotulo = datas.slice(0, MAX_ROTULADOS).map((d) => ({
+    valor: d.valor, ini: d.ini, fim: d.fim, trecho: trecho(doc, d.ini, d.fim),
+    rotulo: rotuloAntes(norm, d.ini, CHAVES_DATA), pagina: paginaDe(doc, d.ini),
+  }));
   return doc;
+}
+
+// ------------------------------------------------------------------ rótulo e página de cada valor/data
+
+const CHAVES_VALOR = new Set([
+  "valor", "vlr", "vl", "preco", "pu", "principal", "montante", "saldo", "total", "importancia", "quantia", "parcela",
+  "prestacao", "desembolso", "liquido", "bruto", "nominal", "aquisicao", "aplicacao", "integralizacao", "subscricao",
+  "cessao", "credito", "financiado", "emprestimo", "face", "emissao", "presente", "atualizado",
+]);
+const CHAVES_DATA = new Set([
+  "data", "emissao", "emitida", "emitido", "vencimento", "vencto", "vencendo", "desembolso", "integralizacao", "liberacao",
+  "assinatura", "aquisicao", "cessao", "pagamento", "referencia", "posicao", "credito", "inicio", "termino",
+]);
+const CONECTORES = new Set(["de", "da", "do", "das", "dos", "total", "final", "unitario", "original", "em", "a", "ao", "no", "na"]);
+const JANELA_ROTULO = 70;
+const RE_VALOR_OU_DATA = /(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}(?!\d)|\d{1,2}[/.-]\d{1,2}[/.-]\d{4}/g;
+const MAX_ROTULADOS = 600;
+
+/**
+ * Rótulo logo antes da posição: a última palavra-chave (valor, emissão, vencimento…) e as que a acompanham
+ * ("data de emissão", "valor total da emissão"), sem atravessar outro valor ou data.
+ */
+export function rotuloAntes(norm: string, ini: number, chaves: Set<string>): string {
+  let janela = norm.slice(Math.max(0, ini - JANELA_ROTULO), ini);
+  let ultimo: RegExpMatchArray | null = null;
+  for (const m of janela.matchAll(RE_VALOR_OU_DATA)) ultimo = m;
+  if (ultimo) janela = janela.slice(ultimo.index! + ultimo[0].length);
+  const tokens = janela.replace(/r\$/g, " ").replace(/[^a-z0-9%]+/g, " ").trim().split(" ").filter(Boolean);
+  let i = -1;
+  tokens.forEach((t, k) => {
+    if (chaves.has(t)) i = k;
+  });
+  if (i < 0) return "";
+  // muitas palavras entre a palavra-chave e o valor = cabeçalho de tabela, não rótulo deste valor
+  if (tokens.slice(i + 1).filter((t) => !CONECTORES.has(t) && !chaves.has(t)).length > 3) return "";
+  let j = i;
+  while (j > 0 && (chaves.has(tokens[j - 1]) || CONECTORES.has(tokens[j - 1])) && i - j < 4) j--;
+  return tokens.slice(j, j + 8).join(" ");
+}
+
+/** Página (1, 2…) de uma posição do texto normalizado. */
+export function paginaDe(doc: Documento, iniNorm: number): number {
+  if (doc.paginas.length < 2 || !doc.mapa.length) return 1;
+  const pos = doc.mapa[Math.max(0, Math.min(iniNorm, doc.mapa.length - 1))];
+  let p = 0;
+  while (p + 1 < doc.paginas.length && doc.paginas[p + 1] <= pos) p++;
+  return p + 1;
+}
+
+/** Posição das páginas do texto bruto convertida para o texto com espaços simples. */
+function paginasNoTexto(bruto: string, paginas: number[] | undefined): number[] {
+  if (!paginas || paginas.length < 2) return [0];
+  return paginas.map((off) => bruto.slice(0, off).replace(/\s+/g, " ").trimStart().length);
 }
 
 export function documentoComErro(nome: string, caminho: string, erro: string): Documento {

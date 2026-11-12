@@ -80,6 +80,38 @@ Como a duplicata traz as datas em tabela, longe do rótulo, a data exata num doc
 não estiver lá, o app mostra a data mais próxima do documento e a diferença em dias. Documento que só cita o cedente
 deixa o sacado "Verificar". A WP_Termo continua conferida pelo valor de aquisição.
 
+### Estoque pelo Fromtis (API SOAP)
+
+Para as administradoras com o webservice do Fromtis (Azumi, Finvest, Limine, FIDD — o mesmo que o hub usa em
+"Extrair relatórios DC Fromtis"), o cartão Carteira ganha a opção **Fromtis**: ao conferir, o app agenda o relatório de
+estoque do CNPJ na data-base, espera ficar pronto (até ~90 s), baixa o ZIP e lê o CSV (mesmo layout do
+`Estoque_Agrupado`; estoque grande confere só os itens da WP_Termo). Configure `FROMTIS_<ADM>_URL`, `_USUARIO` e `_SENHA`
+(usuário e senha vão nos cabeçalhos HTTP, como no hub). Login recusado pausa a administradora por 15 min.
+
+### Comparação com origem e "Provável"
+
+Os dados nem sempre vêm no campo certo (ex.: o valor nominal da amostra é o "valor de aplicação" do documento). Por
+isso a conferência também aproxima: cruza todo valor e data da carteira (e da WP_Termo), com o nome da coluna de onde
+veio, contra todo valor e data dos documentos ligados ao título, com o **rótulo** que vem antes ("valor total da
+emissão", "data de desembolso"…) e a **página**. Cada par sai como *igual*, *campo diferente*, *sem rótulo*,
+*aproximado* (até 0,5% ou 31 dias) ou *calculado*. Quando a regra campo a campo não acha, mas a comparação deduz o
+valor/data, o campo fica **Provável** (com a origem na nota); documentos que discordam entre si continuam "Verificar".
+Tudo aparece em "Comparações" no resultado e na aba **Comparações** do Excel.
+
+### Títulos com taxa (Nota Comercial, CCB, CRI…)
+
+Quando a descrição do ativo ou o documento traz "% do CDI + x% a.a." (ou prefixado a.a./a.m.), o app tenta chegar ao
+valor da carteira pela conta: principal do documento × fator do CDI (série diária do Banco Central, buscada pela rota
+`/api/indices/cdi`) da emissão até a aquisição (→ VL Aplic.) ou até a data-base (→ valor presente). Aceita até 0,2% de
+diferença e mostra a conta inteira. A taxa da descrição do ativo na carteira manda; IPCA/IGP-M não são calculados.
+
+### Bater PDF
+
+Como no bate-lastro: **Buscar nos PDFs** (ou **Bater PDF** numa pendência) procura um texto, valor ou data em todos os
+documentos lidos (sem acento/maiúsculas; "1234,56" acha "1.234,56"), mostra a página com o termo destacado e permite
+**vincular** a pendência ao documento campo a campo — V (confere), D (divergente), P (sem valor no documento). A marca
+de quem confere vale mais que a automática e entra no resumo e no Excel.
+
 ### Como os documentos são ligados a cada título
 
 - **direto**: o documento traz o VL Aplic. exato (tolerância de R$ 0,01);
@@ -108,6 +140,7 @@ Veja `.env.example`.
 | `BRITECH_USUARIO`, `BRITECH_SENHA` | credenciais da API da Britech (segredo) |
 | `BRITECH_URL` | padrão `https://delta.britech.com.br/WS/api` (Britech da Planner) |
 | `BRITECH_<ADM>_URL`, `_USUARIO`, `_SENHA` | Britech de cada administradora (ID, INTRA, FINVEST, ATIVA, AMERICA, VERT, MFPEPPER, RJI, GUIDE…), gerados por `scripts/importar-acessos-britech.mjs` (segredo) |
+| `FROMTIS_<ADM>_URL`, `_USUARIO`, `_SENHA` | webservice do Fromtis de cada administradora, para o estoque de recebíveis (segredo) |
 | `LASTRO_DRIVE_BASE` | pasta do trimestre no Drive |
 | `LASTRO_DRIVE_RAIZES` | raízes que o servidor pode ler (padrão `G:\Drives compartilhados`) |
 | `LASTRO_IPS_PERMITIDOS` | IPs públicos (ou faixas CIDR) que podem abrir o app publicado; quem vem deles não precisa da chave |

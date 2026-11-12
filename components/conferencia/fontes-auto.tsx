@@ -100,7 +100,14 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
   const [wpErro, setWpErro] = useState("");
   const [carregandoWp, setCarregandoWp] = useState(false);
   const [dataBase, setDataBase] = useState("");
-  const [modoCarteira, setModoCarteira] = useState<"api" | "drive">(status.britech.configurada ? "api" : "drive");
+  const [modoCarteira, setModoCarteira] = useState<"api" | "drive" | "fromtis">(status.britech.configurada ? "api" : "drive");
+  // Fromtis (API SOAP de estoque): a administradora padrão é a da pasta escolhida no Drive (AZUMI, FINVEST, LIMINE…)
+  const admsFromtis = useMemo(() => status.fromtis?.administradoras ?? [], [status.fromtis]);
+  const [escolhaFromtis, setEscolhaFromtis] = useState("");
+  const admFromtisDaPasta = useMemo(() => {
+    const pasta = normalizar(adms.find((a) => a.base === baseAplicada)?.nome ?? nomeDaPasta(baseAplicada));
+    return admsFromtis.find((a) => pasta === normalizar(a.adm) || pasta.includes(normalizar(a.nome)))?.adm ?? "";
+  }, [adms, baseAplicada, admsFromtis]);
   const [carteiras, setCarteiras] = useState<{ lista: OpcaoCarteira[]; erro: string } | null>(null);
   const [idCarteira, setIdCarteira] = useState("");
   const [formatada, setFormatada] = useState<CarteiraFormatada | null | undefined>(undefined);
@@ -189,6 +196,7 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
     setRecebiveis(lista);
     const preferirDrive = deRecebiveis && lista.length > 0;
     const temNoDrive = !!arquivo || lista.length > 0;
+    const preferirFromtis = deRecebiveis && !preferirDrive && !!admFromtisDaPasta;
     setArquivoSel(preferirDrive ? lista[0].caminho : arquivo?.caminho ?? lista[0]?.caminho ?? "");
     if (api.status === "fulfilled") {
       const { opcoes, padrao } = opcoesDeCarteira(api.value.carteiras, arquivo?.idCarteira);
@@ -196,11 +204,12 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
       setIdCarteira(padrao);
       const falhas = api.value.falhas.map((f) => f.adm).join(", ");
       setAvisoBritech(!opcoes.length && falhas ? `Não consegui consultar: ${falhas}.` : "");
-      setModoCarteira(preferirDrive || (!opcoes.length && temNoDrive) ? "drive" : "api");
+      setModoCarteira(preferirDrive ? "drive" : preferirFromtis ? "fromtis" : !opcoes.length && temNoDrive ? "drive" : "api");
     } else {
       setCarteiras({ lista: [], erro: mensagem(api.reason) });
       setIdCarteira(arquivo?.idCarteira ?? "");
-      if (temNoDrive) setModoCarteira("drive");
+      if (preferirFromtis) setModoCarteira("fromtis");
+      else if (temNoDrive) setModoCarteira("drive");
     }
   }
 
@@ -265,7 +274,11 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
   ];
   const noDrive = opcoesDrive.find((o) => o.caminho === arquivoSel) ?? opcoesDrive[0];
   const procurandoNoDrive = formatada === undefined || recebiveis === undefined;
-  const carteiraPronta = modoCarteira === "api" ? !!(idCarteira && dataEf && status.britech.configurada) : !!noDrive;
+  const cnpjFundo = wp?.cnpj || fundo?.cnpj || "";
+  const admFromtis = admsFromtis.find((a) => a.adm === escolhaFromtis) ?? admsFromtis.find((a) => a.adm === admFromtisDaPasta) ?? admsFromtis[0];
+  const carteiraPronta = modoCarteira === "api" ? !!(idCarteira && dataEf && status.britech.configurada)
+    : modoCarteira === "fromtis" ? !!(admFromtis && dataEf && cnpjFundo.length === 14)
+      : !!noDrive;
   const lastroPronto = !!lastro && lastro.pasta === pastaSel && !lastro.erro;
   const preparo: Preparo | null = wp && lastroPronto && carteiraPronta && lastro ? {
     workpaper: wp,
@@ -278,10 +291,18 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
           nome: `carteira_${idCarteira}_${dataEf}.xlsx`,
         }),
       }
-      : {
-        rotulo: noDrive!.caminho.replace(/^pasta:/, ""),
-        obter: async () => ({ bytes: await provedor.arquivo(noDrive!.caminho), nome: noDrive!.arquivo }),
-      },
+      : modoCarteira === "fromtis"
+        ? {
+          rotulo: `Fromtis ${admFromtis!.nome} — estoque do CNPJ ${fmtCnpj(cnpjFundo)} em ${fmtData(dataEf)}`,
+          obter: async () => ({
+            bytes: await servidor.estoqueFromtis(admFromtis!.adm, cnpjFundo, dataEf!),
+            nome: `estoque_fromtis_${cnpjFundo}_${dataEf}.csv`,
+          }),
+        }
+        : {
+          rotulo: noDrive!.caminho.replace(/^pasta:/, ""),
+          obter: async () => ({ bytes: await provedor.arquivo(noDrive!.caminho), nome: noDrive!.arquivo }),
+        },
     lastro: { nome: nomePasta, obter: async () => lastro.arquivos },
   } : null;
 
@@ -332,7 +353,9 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
           pronto={!!wp && carteiraPronta}
           descricao={modoCarteira === "api"
             ? <>Composição da carteira na data-base, direto da API da Britech da administradora, achada pelo CNPJ.</>
-            : <>Do Drive: a carteira Britech já baixada (<code className="text-creme/80">_Carteiras\FORMATADA</code>) ou, nas administradoras sem Britech, a amostra (<code className="text-creme/80">_Amostra</code>) ou o estoque (<code className="text-creme/80">_Insumos</code>) do fundo.</>}
+            : modoCarteira === "fromtis"
+              ? <>Estoque de direitos creditórios do fundo na data-base, pela API do Fromtis da administradora (o mesmo do hub).</>
+              : <>Do Drive: a carteira Britech já baixada (<code className="text-creme/80">_Carteiras\FORMATADA</code>) ou, nas administradoras sem Britech, a amostra (<code className="text-creme/80">_Amostra</code>) ou o estoque (<code className="text-creme/80">_Insumos</code>) do fundo.</>}
         >
           <Alternador
             valor={modoCarteira}
@@ -340,7 +363,11 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
               onMudar();
               setModoCarteira(m);
             }}
-            opcoes={[{ valor: "api", rotulo: "API Britech" }, { valor: "drive", rotulo: "Arquivo no Drive" }]}
+            opcoes={[
+              { valor: "api", rotulo: "API Britech" },
+              { valor: "drive", rotulo: "Arquivo no Drive" },
+              ...(admsFromtis.length ? [{ valor: "fromtis" as const, rotulo: "Fromtis" }] : []),
+            ]}
           />
           {!wp ? (
             <p className="text-xs text-creme/45">Escolha o fundo primeiro.</p>
@@ -368,6 +395,23 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
                 {idCarteira && <p className="text-xs text-creme/55">Carteira {idCarteira}{nomeCarteira ? ` (${nomeCarteira})` : ""}{opcaoCarteira?.admNome ? ` na Britech ${opcaoCarteira.admNome}` : ""} em {fmtData(dataEf)} — baixada ao conferir.</p>}
               </div>
             )
+          ) : modoCarteira === "fromtis" ? (
+            <div className="space-y-2">
+              {admsFromtis.length > 1 && (
+                <select
+                  value={admFromtis?.adm ?? ""}
+                  onChange={(e) => { onMudar(); setEscolhaFromtis(e.target.value); }}
+                  className={classeSelect}
+                  aria-label="Fromtis da administradora"
+                >
+                  {admsFromtis.map((a) => <option key={a.adm} value={a.adm}>{a.nome}</option>)}
+                </select>
+              )}
+              <p className="text-xs text-creme/55">
+                Estoque do CNPJ {fmtCnpj(cnpjFundo)} em {fmtData(dataEf)} no Fromtis da {admFromtis?.nome} — gerado e baixado ao
+                conferir (pode levar 1 a 2 minutos). Estoque grande: o app confere só os recebíveis da WP_Termo.
+              </p>
+            </div>
           ) : procurandoNoDrive ? (
             <p className="inline-flex items-center gap-2 text-xs text-creme/60"><Loader2 className="size-3 animate-spin" /> Procurando a carteira, a amostra e o estoque do fundo…</p>
           ) : noDrive ? (

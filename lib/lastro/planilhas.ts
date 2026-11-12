@@ -154,7 +154,11 @@ export interface Posicao {
   dataEmissao: string | null;
   dataVencimento: string | null;
   grupo: string;
+  /** nome da coluna de onde veio cada valor/data no arquivo da carteira (para mostrar a origem na comparação) */
+  colunas?: Partial<Record<CampoDaCarteira, string>>;
 }
+
+export type CampoDaCarteira = "valorAplicado" | "valorNominal" | "valorPresente" | "dataEmissao" | "dataVencimento" | "dataAquisicao";
 
 /**
  * Nomes de coluna aceitos para cada campo, em ordem de preferência. Cobre o _BRITECH.xlsx formatado pelo hub,
@@ -223,16 +227,22 @@ export function posicoesDaTabela(linhas: Linha[], primeira = 1): Posicao[] {
     }
   }
   if (iCab < 0) return [];
+  const cabecalho = linhas[iCab] ?? [];
   const posicoes: Posicao[] = [];
   linhas.slice(iCab + 1).forEach((linha, k) => {
-    /** primeiro valor preenchido entre as colunas do campo */
+    /** coluna do primeiro valor preenchido entre as colunas do campo (-1 se nenhuma) */
+    const indice = (campo: string) => (mapa.get(campo) ?? []).find((i) => !vazio(linha?.[i])) ?? -1;
     const col = (campo: string) => {
-      for (const i of mapa.get(campo) ?? []) if (!vazio(linha?.[i])) return linha[i];
-      return null;
+      const i = indice(campo);
+      return i >= 0 ? linha[i] : null;
     };
+    const nomeColuna = (i: number) => (i >= 0 ? texto(cabecalho[i]) : "");
     /** VL Aplic.: o menor valor preenchido entre VALOR CUSTO / APLICAÇÃO / VALOR APLICAÇÃO (como o hub faz) */
-    const valores = (mapa.get("valorAplicado") ?? []).map((i) => paraCentavos(linha?.[i])).filter((v): v is number => v !== null);
-    const valor = valores.length ? Math.min(...valores) : null;
+    const candidatos = (mapa.get("valorAplicado") ?? [])
+      .map((i) => [i, paraCentavos(linha?.[i])] as const)
+      .filter((v): v is readonly [number, number] => v[1] !== null);
+    const menor = candidatos.reduce<readonly [number, number] | null>((m, v) => (!m || v[1] < m[1] ? v : m), null);
+    const valor = menor ? menor[1] : null;
     const emissor = texto(col("emissor"));
     const emissao = paraData(col("dataEmissao"));
     const vencimento = paraData(col("dataVencimento"));
@@ -242,6 +252,11 @@ export function posicoesDaTabela(linhas: Linha[], primeira = 1): Posicao[] {
       cedente: "", valorAplicado: valor, valorNominal: null, valorPresente: paraCentavos(col("valorPresente")),
       dataAquisicao: paraData(col("dataAquisicao")), dataEmissao: emissao, dataVencimento: vencimento,
       grupo: texto(col("grupo")),
+      colunas: {
+        valorAplicado: nomeColuna(menor ? menor[0] : -1), valorPresente: nomeColuna(indice("valorPresente")),
+        dataEmissao: nomeColuna(indice("dataEmissao")), dataVencimento: nomeColuna(indice("dataVencimento")),
+        dataAquisicao: nomeColuna(indice("dataAquisicao")),
+      },
     });
   });
   return posicoes;
@@ -289,6 +304,11 @@ export function recebiveisDaTabela(linhas: Linha[], primeira = 1): Posicao[] {
   }
   if (!mapa) return [];
   const m = mapa;
+  const cabecalho = linhas[iCab] ?? [];
+  const nomeColuna = (campo: string) => {
+    const i = m.get(campo);
+    return i === undefined ? "" : texto(cabecalho[i]);
+  };
   const posicoes: Posicao[] = [];
   linhas.slice(iCab + 1).forEach((linha, k) => {
     const col = (campo: string) => {
@@ -308,6 +328,11 @@ export function recebiveisDaTabela(linhas: Linha[], primeira = 1): Posicao[] {
       valorAplicado: valor, valorNominal: nominal, valorPresente: paraCentavos(col("valorPresente")),
       dataAquisicao: paraData(col("dataAquisicao")), dataEmissao: paraData(col("dataEmissao")),
       dataVencimento: paraData(col("dataVencimento")), grupo: tipo,
+      colunas: {
+        valorAplicado: nomeColuna(aquisicao !== null ? "valorAquisicao" : "valorNominal"), valorNominal: nomeColuna("valorNominal"),
+        valorPresente: nomeColuna("valorPresente"), dataEmissao: nomeColuna("dataEmissao"),
+        dataVencimento: nomeColuna("dataVencimento"), dataAquisicao: nomeColuna("dataAquisicao"),
+      },
     });
   });
   return posicoes;
@@ -318,7 +343,9 @@ export function lerCarteira(bytes: Uint8Array, arquivo: string): Posicao[] {
   let wb: XLSX.WorkBook;
   try {
     if (arquivo.toLowerCase().endsWith(".csv")) {
-      const t = new TextDecoder("utf-8").decode(bytes);
+      // os sistemas das administradoras costumam exportar em Windows-1252 (Latin-1): sem isso os acentos dos nomes quebram
+      let t = new TextDecoder("utf-8").decode(bytes);
+      if (t.includes("�")) t = new TextDecoder("windows-1252").decode(bytes);
       const separador = (t.match(/;/g)?.length ?? 0) > (t.match(/,/g)?.length ?? 0) ? ";" : ",";
       wb = XLSX.read(t, { type: "string", FS: separador, raw: true });
     } else {
