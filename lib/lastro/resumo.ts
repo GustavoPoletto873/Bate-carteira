@@ -61,38 +61,56 @@ export function pontosDaLinha(l: LinhaResultado, campos: [ChaveCampo, string][] 
   return lista.sort((a, b) => ordem[a.tipo] - ordem[b.tipo]);
 }
 
-const ATENCAO: Situacao[] = ["Divergente", "Só no WP", "Verificar"];
+const ATENCAO: Situacao[] = ["Divergente", "Só no WP", "Verificar", "Provável"];
+const BATE = new Set(["Confere", "Provável"]);
 
+/**
+ * Validado visualmente: o valor e a data de emissão batem com os documentos (os outros campos podem pedir conferência).
+ * Fica nos validados, mas precisa da aprovação do analista.
+ */
+export function aguardaAprovacao(l: LinhaResultado): boolean {
+  return !l.aprovado && ATENCAO.includes(l.situacao) && l.situacao !== "Só no WP"
+    && BATE.has(l.campos.valor.status) && BATE.has(l.campos.emissao.status);
+}
+
+/** O analista aprovou: o título passa a conferir (na tela e no Excel), marcado como aprovado. */
+export function aplicarAprovacoes(linhas: LinhaResultado[], aprovados: Set<number>): LinhaResultado[] {
+  if (!aprovados.size) return linhas;
+  return linhas.map((l) => (aprovados.has(l.id) ? { ...l, situacao: "OK" as Situacao, aprovado: true } : l));
+}
+
+/** Os três blocos do resumo: o que precisa de atenção, o que está validado e o que ficou sem documento. */
 export interface ResumoTela {
+  /** divergem ou faltam confirmar (divergentes primeiro) */
   atencao: LinhaResultado[];
-  /** conferem por aproximação (outro campo, sem rótulo, diferença pequena ou cálculo da taxa) */
-  provaveis: LinhaResultado[];
-  ok: LinhaResultado[];
-  semDocumentos: LinhaResultado[];
+  /** valor e emissão batem: validados visualmente, aguardando a aprovação do analista */
+  aprovar: LinhaResultado[];
+  /** 100% validados (conferem em tudo, ou aprovados pelo analista) */
+  validados: LinhaResultado[];
+  /** 100% pendentes: nenhum documento da pasta cita o título */
+  pendentes: LinhaResultado[];
   /** frase de abertura, ex.: "3 de 13 títulos precisam de atenção" */
   titulo: string;
-  /** contagens que entram na frase, na ordem de gravidade */
-  partes: { situacao: Situacao; n: number }[];
 }
 
 export function resumirParaTela(linhas: LinhaResultado[], tipo: TipoCarteira = "titulos"): ResumoTela {
   const [um, varios] = tipo === "recebiveis" ? ["recebível precisa", "recebíveis precisam"] : ["título precisa", "títulos precisam"];
+  const aprovar = linhas.filter(aguardaAprovacao);
   const atencao = linhas
-    .filter((l) => ATENCAO.includes(l.situacao))
+    .filter((l) => ATENCAO.includes(l.situacao) && !aguardaAprovacao(l))
     .sort((a, b) => ATENCAO.indexOf(a.situacao) - ATENCAO.indexOf(b.situacao));
-  const ok = linhas.filter((l) => l.situacao === "OK");
-  const provaveis = linhas.filter((l) => l.situacao === "Provável");
-  const semDocumentos = linhas.filter((l) => l.situacao === "Sem documentos");
+  const validados = linhas.filter((l) => l.situacao === "OK");
+  const pendentes = linhas.filter((l) => l.situacao === "Sem documentos");
   const total = linhas.length;
+  const nome = tipo === "recebiveis" ? "recebível" : "título";
   const titulo = !total
     ? "Nenhum título para conferir"
     : atencao.length
       ? `${atencao.length} de ${total} ${total === 1 ? um : varios} de atenção`
-      : semDocumentos.length === total
-        ? `Nenhum ${tipo === "recebiveis" ? "recebível" : "título"} foi achado nos documentos da pasta`
-        : "Nada diverge";
-  const partes = (["Divergente", "Só no WP", "Verificar", "Provável", "Sem documentos", "OK"] as Situacao[])
-    .map((situacao) => ({ situacao, n: linhas.filter((l) => l.situacao === situacao).length }))
-    .filter((p) => p.n > 0);
-  return { atencao, provaveis, ok, semDocumentos, titulo, partes };
+      : aprovar.length
+        ? `${aprovar.length} ${aprovar.length === 1 ? `${nome} aguarda` : `${tipo === "recebiveis" ? "recebíveis" : "títulos"} aguardam`} sua aprovação`
+        : pendentes.length === total
+          ? `Nenhum ${nome} foi achado nos documentos da pasta`
+          : "Nada diverge";
+  return { atencao, aprovar, validados, pendentes, titulo };
 }

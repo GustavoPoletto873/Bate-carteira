@@ -66,6 +66,20 @@ describe.skipIf(!LASTRO_WP || !LASTRO_CARTEIRA || !LASTRO_PASTA)("arquivos reais
         tipos.set(k, (tipos.get(k) ?? 0) + 1);
       }
       console.log("  sacado não achado, por tipo/modo do documento:", Object.fromEntries(tipos));
+      if (process.env.LASTRO_PRE === "2") {
+        // depuração: os 3 primeiros títulos ambíguos e sem emissão, com o candidato e as alternativas (só nomes e pontos)
+        const mostrar = (x: (typeof sugestoes)[number]) => console.log(`   #${x.linhaId} ${x.confianca} ` + [x.candidato, ...x.alternativas]
+          .map((c) => `${c!.arquivo.slice(0, 40)} p${c!.pagina} ${c!.modo} ${c!.score} [${Object.entries(c!.detalhes).filter(([, v]) => v.marca === "V").map(([k]) => k).join(",")}]`).join(" | "));
+        sugestoes.filter((x) => x.confianca === "ambigua").slice(0, 3).forEach(mostrar);
+        sugestoes.filter((x) => x.candidato && x.campos.emissao.marca === "P" && x.campos.emissao.regra !== "sem_valor_na_carteira").slice(0, 3).forEach(mostrar);
+        const ex = sugestoes.find((x) => x.confianca === "alta" && x.campos.emissao.marca === "P" && x.campos.emissao.regra !== "sem_valor_na_carteira");
+        const d = ex && docs.find((dd) => dd.id === ex.candidato!.docId);
+        const l = ex && r.linhas.find((ll) => ll.id === ex.linhaId);
+        if (d && l) {
+          console.log(`   emissão da carteira: ${l.dados?.emissao}`);
+          for (const m of d.bruto.matchAll(/emiss/gi)) console.log(`   …${JSON.stringify(d.bruto.slice(Math.max(0, m.index! - 60), m.index! + 140))}`);
+        }
+      }
     }
     if (LASTRO_SAIDA) writeFileSync(LASTRO_SAIDA, Buffer.from(await gerarExcel(r)));
     expect(r.linhas.length).toBeGreaterThan(0);

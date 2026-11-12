@@ -43,6 +43,15 @@ O `npm install` também copia o worker e as fontes do pdf.js para `public/pdfjs`
    (dá para trocar na lista) e lista os arquivos.
 4. **Conferir** → resultado na tela → **Baixar Excel com as evidências**.
 
+O resumo tem três blocos, cada um expansível:
+
+- **Precisam de atenção**: divergem dos documentos ou da WP_Termo, ou falta confirmar; uma linha por campo
+  (carteira × documentos), e o porquê em "Detalhes".
+- **Validados**: conferem em tudo. Os que têm o valor e a data de emissão batendo ficam **validados visualmente** e
+  aguardam a aprovação do analista ("Aprovar" ou "Aprovar todos"; dá para desfazer). No Excel, o aprovado sai como
+  "OK (aprovado pelo analista)".
+- **Pendentes**: nenhum documento da pasta cita o título.
+
 Quando o trimestre tem várias administradoras (`…\2T2026\PLANNER`, `…\2T2026\ID`…), escolha a administradora na
 tela. A pasta de lastro pode se chamar `Lastro e Termo` ou `_Lastro e Termo`. A pasta padrão (`LASTRO_DRIVE_BASE`)
 também pode ser trocada na tela.
@@ -104,7 +113,7 @@ do informe da CVM), o resultado traz a mesma validação da aba CVM: composiçã
 **carteira × estoque** (DC vincendos e vencidos × soma do valor presente do estoque por situação, PDD × `VALOR_PDD`,
 tolerância de R$ 1,00); a **amostra** da WP_Termo por categoria (coluna "Amostra") com a representatividade no PL; e a
 contagem V/P da WP_Termo e da WP_Lastro. Se a carteira conferida é a amostra, o app lê também o estoque do Drive só para
-essa validação. Aba **Validação da carteira** no Excel.
+essa validação. Fica na aba **Validação da carteira** do Excel (não aparece na tela, para não poluir o resumo).
 
 ### Posição da carteira pelo Sinqia
 
