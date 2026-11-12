@@ -1,7 +1,7 @@
 /** Resumo da tela: uma linha curta por campo com problema e os títulos que precisam de atenção primeiro. */
 import { describe, expect, it } from "vitest";
 import type { Campo, ChaveCampo, LinhaResultado, Situacao } from "../lib/lastro/conciliacao";
-import { pontosDaLinha, resumirParaTela } from "../lib/lastro/resumo";
+import { aguardaAprovacao, aplicarAprovacoes, pontosDaLinha, resumirParaTela } from "../lib/lastro/resumo";
 
 const campo = (p: Partial<Campo> = {}): Campo => ({
   status: "Confere", britech: "", documentos: "", fontes: [], nota: "", wp: "", wpStatus: "—", ...p,
@@ -63,20 +63,37 @@ describe("pontos de atenção de um título", () => {
 });
 
 describe("resumo da tela", () => {
-  it("separa o que precisa de atenção (divergentes primeiro) do resto", () => {
-    const linhas = [linha("OK"), linha("Verificar"), linha("Sem documentos"), linha("Divergente"), linha("Sem documentos")];
+  it("três blocos: atenção (divergentes primeiro), validados e pendentes", () => {
+    const linhas = [
+      linha("OK"), linha("Verificar", { valor: { status: "Verificar" } }), linha("Sem documentos"),
+      linha("Divergente", { valor: { status: "Diverge" } }), linha("Sem documentos"),
+    ];
     const r = resumirParaTela(linhas);
     expect(r.titulo).toBe("2 de 5 títulos precisam de atenção");
     expect(r.atencao.map((l) => l.situacao)).toEqual(["Divergente", "Verificar"]);
-    expect(r.semDocumentos).toHaveLength(2);
-    expect(r.ok).toHaveLength(1);
-    expect(r.partes).toEqual([
-      { situacao: "Divergente", n: 1 }, { situacao: "Verificar", n: 1 }, { situacao: "Sem documentos", n: 2 }, { situacao: "OK", n: 1 },
-    ]);
+    expect(r.pendentes).toHaveLength(2);
+    expect(r.validados).toHaveLength(1);
+    expect(r.aprovar).toHaveLength(0);
   });
 
-  it("diz quando nada diverge e quando nada foi achado", () => {
+  it("valor e emissão batendo: validado visualmente, aguardando a aprovação do analista", () => {
+    const quase = linha("Verificar", { valor: { status: "Confere" }, emissao: { status: "Provável" }, vencimento: { status: "Verificar" } });
+    const diverge = linha("Divergente", { valor: { status: "Diverge" }, emissao: { status: "Confere" } });
+    const r = resumirParaTela([quase, diverge, linha("OK")]);
+    expect(r.aprovar.map((l) => l.id)).toEqual([quase.id]);
+    expect(r.atencao.map((l) => l.id)).toEqual([diverge.id]);
+    expect(aguardaAprovacao(quase)).toBe(true);
+
+    const aprovado = aplicarAprovacoes([quase, diverge], new Set([quase.id]));
+    expect(aprovado[0]).toMatchObject({ situacao: "OK", aprovado: true });
+    const depois = resumirParaTela(aprovado);
+    expect(depois.validados.map((l) => l.id)).toEqual([quase.id]);
+    expect(depois.aprovar).toHaveLength(0);
+  });
+
+  it("diz quando nada diverge, quando falta aprovar e quando nada foi achado", () => {
     expect(resumirParaTela([linha("OK"), linha("Sem documentos")]).titulo).toBe("Nada diverge");
+    expect(resumirParaTela([linha("Verificar", { valor: { status: "Confere" }, emissao: { status: "Confere" } })]).titulo).toBe("1 título aguarda sua aprovação");
     expect(resumirParaTela([linha("Sem documentos")]).titulo).toBe("Nenhum título foi achado nos documentos da pasta");
   });
 });

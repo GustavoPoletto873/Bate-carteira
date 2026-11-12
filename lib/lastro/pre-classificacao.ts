@@ -515,7 +515,9 @@ function candidatosDoDoc(e: Pend, di: DocIndexado, refs: Ref[]): CandidatoIntern
   if (!regioes.length) return null;
   regioes.sort((a, b) => b.score - a.score || a.pag.numero - b.pag.numero || a.ini - b.ini);
   const melhor = regioes[0];
-  const rival = regioes.slice(1).find((r) => r.modo === "linha" || melhor.modo === "linha");
+  // rival dentro do documento: outra linha (ou página) que também traz algo do título — a página que só tem as partes não conta
+  const doTitulo = (r: Regiao) => (["numero", "valor", "vencimento"] as CampoPre[]).some((k) => r.aval[k].marca === "V");
+  const rival = regioes.slice(1).find((r) => (r.modo === "linha" || melhor.modo === "linha") && (doTitulo(r) || !doTitulo(melhor)));
   let score = melhor.score;
   if (melhor.modo === "pagina") {
     if (!documentoDoTitulo(e, di)) return null;
@@ -548,6 +550,8 @@ function completarNoDocumento(e: Pend, di: DocIndexado, r: Regiao, soma: boolean
 /** Mesmo documento (cópias): a mesma página, ou ≥ 90% dos mesmos CPFs, valores e datas. */
 function mesmoDocumento(a: CandidatoInterno, b: CandidatoInterno): boolean {
   if (a.melhor.pag.hash === b.melhor.pag.hash) return true;
+  // o mesmo arquivo em duas subpastas (cópia baixada de novo)
+  if (a.di.doc.nome.toLowerCase() === b.di.doc.nome.toLowerCase() && Math.abs(a.score - b.score) < 0.01) return true;
   const x = a.di.assinatura;
   const y = b.di.assinatura;
   if (x.size < 8 || y.size < 8 || Math.min(x.size, y.size) / Math.max(x.size, y.size) < 0.9) return false;
@@ -614,8 +618,22 @@ export function preClassificarTitulo(l: LinhaResultado, ind: Indice): Sugestao {
     if (!usados.some((u) => mesmoDocumento(u, c))) usados.push(c);
   }
   if (!usados.length) return vazio;
-  const [melhor, segundo] = usados;
-  let conf = confianca(melhor, segundo);
+  const [melhor] = usados;
+  // rival de verdade: não conta o documento que concorda com o sugerido (os mesmos campos com os mesmos valores, ex.:
+  // termo constitutivo e boletim de subscrição da mesma emissão) nem o que só traz a pessoa quando o sugerido traz o título
+  const doTitulo = (c: CandidatoInterno) => (["numero", "valor", "vencimento"] as CampoPre[]).some((k) => c.melhor.aval[k].marca === "V");
+  const concorda = (x: CandidatoInterno, y: CandidatoInterno) => {
+    const vx = CAMPOS_PRE.filter((k) => x.melhor.aval[k].marca === "V");
+    const vy = CAMPOS_PRE.filter((k) => y.melhor.aval[k].marca === "V");
+    const igual = (u: string, w: string) => {
+      const du = u.replace(/\D/g, "");
+      const dw = w.replace(/\D/g, "");
+      return du || dw ? du === dw : normalizarMesmoTamanho(u).trim() === normalizarMesmoTamanho(w).trim();
+    };
+    return vx.length === vy.length && vx.every((k) => y.melhor.aval[k].marca === "V" && igual(x.melhor.aval[k].documento, y.melhor.aval[k].documento));
+  };
+  const rival = usados.slice(1).find((c) => !concorda(melhor, c) && !(doTitulo(melhor) && !doTitulo(c)));
+  let conf = confianca(melhor, rival);
   const a = melhor.melhor.aval;
   const avisos: string[] = [];
 

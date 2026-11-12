@@ -177,7 +177,7 @@ export async function gerarExcel(r: ResultadoCompleto): Promise<ArrayBuffer> {
     const c = ln.campos;
     const fontes = unicos(Object.values(c).flatMap((x) => x.fontes));
     const notas = campos.filter(([k]) => c[k].nota).map(([k, rot]) => `${rot}: ${c[k].nota}`);
-    return [ln.situacao, ln.ativo, ln.emissor, ...(rec ? [ln.cedente] : []), ln.codigo, ln.dataAquisicao,
+    return [ln.aprovado ? "OK (aprovado pelo analista)" : ln.situacao, ln.ativo, ln.emissor, ...(rec ? [ln.cedente] : []), ln.codigo, ln.dataAquisicao,
       c.valor.britech, c.valor.wp, c.valor.wpStatus, c.valor.documentos, c.valor.status,
       c.emissao.britech, c.emissao.wp, c.emissao.wpStatus, c.emissao.documentos, c.emissao.status,
       c.vencimento.britech, c.vencimento.wp, c.vencimento.wpStatus, c.vencimento.documentos, c.vencimento.status,

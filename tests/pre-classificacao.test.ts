@@ -105,6 +105,17 @@ describe("documento sugerido e marca de cada campo", () => {
     expect(motivoDe(s, ROTULOS)).toMatchObject({ chave: "confere", decisao: "confirmar" }); // a carteira não tem emissão
   });
 
+  it("documentos que concordam (mesmos campos e valores) ou que só trazem a pessoa não deixam a sugestão ambígua", () => {
+    const termo = "TERMO CONSTITUTIVO DA 1ª EMISSÃO\nEmitente: EMPRESA ALFA LTDA CNPJ 11.222.333/0001-81\nNº 7781200\nValor R$ 25.000,00\nVencimento: 10/03/2027";
+    const boletim = "BOLETIM DE SUBSCRIÇÃO DA 1ª EMISSÃO\nEmitente: EMPRESA ALFA LTDA CNPJ 11.222.333/0001-81\nNº 7781200\nValor R$ 25.000,00\nVencimento: 10/03/2027\nSubscritor";
+    const outro = "TERMO DA 2ª EMISSÃO\nEmitente: EMPRESA ALFA LTDA CNPJ 11.222.333/0001-81\nOutras condições";
+    const s = preClassificarTitulo(linha({
+      tipo: "Nota Comercial", numero: "7781200", sacado: "EMPRESA ALFA LTDA", docSacado: "11222333000181", nominal: 2500000, vencimento: "2027-03-10",
+    }), indexar([doc("termo.pdf", termo), doc("boletim.pdf", boletim), doc("outro.pdf", outro)]));
+    expect(s.confianca).toBe("alta");
+    expect(s.alternativas.length).toBeGreaterThan(0);
+  });
+
   it("termo com vários títulos: vale a linha do título, não o valor da linha vizinha", () => {
     const termo = doc("termo.pdf", "TERMO DE CESSÃO\nRelação dos títulos cedidos\n"
       + "52623-05 MERCEARIA EXEMPLO 12.345.678/0001-95 R$ 2.000,00 10/09/2026\n"

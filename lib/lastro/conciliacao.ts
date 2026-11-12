@@ -73,6 +73,8 @@ export interface LinhaResultado {
   comparacoes: Comparacao[];
   /** documento vinculado à mão no Bater PDF (a marca de quem confere vence a automática) */
   manual?: string;
+  /** aprovado pelo analista no resumo (valor e emissão batiam; os outros campos foram vistos por ele) */
+  aprovado?: boolean;
   /** dados do título como vieram da carteira, para a pré-classificação (pre-classificacao.ts) */
   dados?: DadosDoTitulo;
 }
