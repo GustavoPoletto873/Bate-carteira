@@ -29,7 +29,10 @@ describe("Monday", () => {
   it("decide a fonte pela administradora e pelo sistema", () => {
     const f = (adm: string, sistema = "") => papelDoFundo({ nome: "F", adm, sistema, carteira: "", grupo: "" }).fonte;
     expect(f("ID", "BRITECH")).toBe("britech");
+    expect(f("AZUMI", "SINQIA")).toBe("arquivo"); // Sinqia em stand-by
+    vi.stubEnv("LASTRO_SINQIA_ATIVO", "1");
     expect(f("AZUMI", "SINQIA")).toBe("sinqia");
+    vi.unstubAllEnvs();
     expect(f("INTRA")).toBe("arquivo");
     expect(f("FINVEST")).toBe("arquivo");
     expect(f("PLANNER", "MAPS")).toBe("arquivo");

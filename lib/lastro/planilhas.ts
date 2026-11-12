@@ -99,7 +99,13 @@ export function lerWorkpaper(bytes: Uint8Array, arquivo: string): Workpaper {
     const t = String(v ?? "").trim().toUpperCase();
     return t === "BASE_VALOR_AQUISICAO" || t === "BASE_NUMERO_DOC";
   }));
-  if (iCab < 0) throw new ErroDeEntrada("Não achei o cabeçalho da aba WP_Termo (linha com BASE_VALOR_AQUISICAO).");
+  if (iCab < 0) {
+    // FIC (investe em cotas) e fundos sem cessão trazem a WP_Termo sem a tabela BASE_… (no máximo colunas auxiliares)
+    const semTabela = !linhas.some((l) => l.some((v) => /^BASE_/i.test(String(v ?? "").trim())));
+    throw new ErroDeEntrada(semTabela
+      ? "A aba WP_Termo deste workpaper está vazia (sem a tabela BASE_…): o fundo não tem termos de cessão para conferir (comum em FIC)."
+      : "Não achei o cabeçalho da aba WP_Termo (linha com BASE_VALOR_AQUISICAO).");
+  }
   const colunas = new Map<string, number>();
   linhas[iCab].forEach((v, i) => {
     const t = String(v ?? "").trim().toUpperCase();

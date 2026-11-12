@@ -109,6 +109,10 @@ essa validação. Aba **Validação da carteira** no Excel.
 `/api/v1/carteiras/{carteira}/relatorios/posicao/carteirac` (o mesmo do boleta_sinqia). A posição traz os títulos de
 renda fixa; os direitos creditórios vêm só em totais.
 
+**Em stand-by:** o servidor do Sinqia recusa pedidos vindos da Vercel (firewall, HTTP 403), então o app não oferece o
+Sinqia e trata os fundos dele como "arquivo" (amostra/estoque do Drive). No computador do escritório dá para ligar com
+`LASTRO_SINQIA_ATIVO=1`.
+
 ### Estoque pelo Fromtis (API SOAP)
 
 Para as administradoras com o webservice do Fromtis (Azumi, Finvest, Limine, FIDD — o mesmo que o hub usa em
@@ -116,6 +120,8 @@ Para as administradoras com o webservice do Fromtis (Azumi, Finvest, Limine, FID
 estoque do CNPJ na data-base, espera ficar pronto (até ~90 s), baixa o ZIP e lê o CSV (mesmo layout do
 `Estoque_Agrupado`; estoque grande confere só os itens da WP_Termo). Configure `FROMTIS_<ADM>_URL`, `_USUARIO` e `_SENHA`
 (usuário e senha vão nos cabeçalhos HTTP, como no hub). Login recusado pausa a administradora por 15 min.
+O usuário precisa do perfil de acesso ao webservice na administradora: sem ele o login passa, mas o agendamento volta
+"Usuário não tem perfil de acesso ao webServices" (o app diz isso no erro). O Fromtis responde normalmente a partir da Vercel.
 
 ### Comparação com origem e "Provável"
 
@@ -125,6 +131,8 @@ veio, contra todo valor e data dos documentos ligados ao título, com o **rótul
 emissão", "data de desembolso"…) e a **página**. Cada par sai como *igual*, *campo diferente*, *sem rótulo*,
 *aproximado* (até 0,5% ou 31 dias) ou *calculado*. Quando a regra campo a campo não acha, mas a comparação deduz o
 valor/data, o campo fica **Provável** (com a origem na nota); documentos que discordam entre si continuam "Verificar".
+Data com rótulo diferente da carteira, mas com a data da carteira no documento (ex.: parcela de Nota Comercial: o termo
+rotula o vencimento final e a parcela está no cronograma), fica "Verificar", não "Divergente".
 Tudo aparece em "Comparações" no resultado e na aba **Comparações** do Excel.
 
 ### Títulos com taxa (Nota Comercial, CCB, CRI…)
@@ -171,6 +179,7 @@ Veja `.env.example`.
 | `BRITECH_<ADM>_URL`, `_USUARIO`, `_SENHA` | Britech de cada administradora (ID, INTRA, FINVEST, ATIVA, AMERICA, VERT, MFPEPPER, RJI, GUIDE…), gerados por `scripts/importar-acessos-britech.mjs` (segredo) |
 | `MONDAY_API_TOKEN` (e `LASTRO_MONDAY_BOARD`) | ler o board de lastro do Monday: administradora, sistema e carteira de cada fundo (segredo) |
 | `SINQIA_<ADM>_URL`, `_TOKEN_URL`, `_USUARIO`, `_SENHA` | posição da carteira pelo Sinqia da administradora (segredo) |
+| `LASTRO_SINQIA_ATIVO` | `1` liga o Sinqia (em stand-by; só funciona da rede do escritório) |
 | `FROMTIS_<ADM>_URL`, `_USUARIO`, `_SENHA` | webservice do Fromtis de cada administradora, para o estoque de recebíveis (segredo) |
 | `LASTRO_DRIVE_BASE` | pasta do trimestre no Drive |
 | `LASTRO_DRIVE_RAIZES` | raízes que o servidor pode ler (padrão `G:\Drives compartilhados`) |

@@ -67,6 +67,19 @@ describe("comparação carteira × documento", () => {
     expect(l.comparacoes.find((c) => c.campo === "emissao")).toMatchObject({ relacao: "campo diferente", documento: { rotulo: "data de desembolso" } });
     expect(l.situacao).toBe("Provável");
   });
+
+  it("parcela: o documento rotula o vencimento final, mas a data da parcela está no cronograma → 'Verificar', não 'Divergente'", () => {
+    const doc = analisar("termo.pdf", "Termo da EMPRESA ALFA LTDA. Valor R$ 1.000.000,00. Data de emissão: 02/01/2026. "
+      + "Data de vencimento: 02/01/2030. Cronograma 02/01/2027 02/01/2028 02/01/2029 02/01/2030");
+    const l = conferir([titulo()], [], [doc]).linhas[0];
+    expect(l.campos.vencimento.status).toBe("Verificar");
+    expect(l.campos.vencimento.nota).toMatch(/rotulam 02\/01\/2030 como vencimento, mas a data da carteira \(02\/01\/2028\) aparece em termo\.pdf p\. 1 sem rótulo/);
+    expect(l.situacao).toBe("Verificar");
+
+    // sem a data da carteira em lugar nenhum, continua divergente
+    const outro = analisar("termo.pdf", "Termo da EMPRESA ALFA LTDA. Valor R$ 1.000.000,00. Data de emissão: 02/01/2026. Data de vencimento: 02/01/2030.");
+    expect(conferir([titulo()], [], [outro]).linhas[0].situacao).toBe("Divergente");
+  });
 });
 
 describe("cálculo pela taxa (Nota Comercial)", () => {

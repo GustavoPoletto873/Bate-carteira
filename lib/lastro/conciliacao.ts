@@ -458,9 +458,17 @@ export function aplicarDeducoes(campos: Record<ChaveCampo, Campo>, comparacoes: 
     const exata = comparacoes.find((x) => x.campo === k && x.carteira.origem === "carteira" && x.relacao !== "aproximado" && x.relacao !== "calculado");
     if (!exata) continue;
     const onde = `${exata.documento.arquivo} p. ${exata.documento.pagina} ${exata.documento.rotulo ? `como "${exata.documento.rotulo}"` : "sem rótulo"}`;
-    // documentos que discordam entre si (ou rótulo certo com outra data) continuam para conferir: a dedução vai na nota
-    if (c.status === "Diverge" || /nao concordam|não concordam/.test(c.nota)) {
+    if (/nao concordam|não concordam/.test(c.nota)) {
+      // documentos que discordam entre si continuam para conferir: a dedução vai na nota
       c.nota = juntar(c.nota, `a data da carteira (${exata.carteira.valor}) aparece em ${onde}`);
+    } else if (c.status === "Diverge") {
+      // o rótulo traz outra data, mas a da carteira está no documento (ex.: parcela no cronograma, com o vencimento
+      // final da operação rotulado): não é divergência comprovada — fica para conferir, com as duas datas na nota
+      c.status = "Verificar";
+      c.nota = `os documentos rotulam ${c.documentos || "outra data"} como ${k === "emissao" ? "emissão" : "vencimento"}, `
+        + `mas a data da carteira (${exata.carteira.valor}) aparece em ${onde} `
+        + (k === "vencimento" ? "(ex.: parcela no cronograma)" : "(confira qual documento é o desta posição)");
+      c.fontes = [...new Set([...c.fontes, exata.documento.arquivo])];
     } else {
       c.status = "Provável";
       c.nota = `provável: a data da carteira (${exata.carteira.valor}) aparece em ${onde}`;
