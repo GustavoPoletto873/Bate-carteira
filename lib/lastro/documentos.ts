@@ -66,6 +66,9 @@ export interface Documento {
   grupo: string;
   /** onde começa cada página em `texto` */
   paginas: number[];
+  /** o texto como saiu do arquivo, com as quebras de linha (a pré-classificação lê linha a linha), e onde começa cada página nele */
+  bruto: string;
+  paginasBrutas: number[];
   /** todos os valores e datas, com rótulo e página (para a comparação com a carteira) */
   valoresComRotulo: Rotulado<number>[];
   datasComRotulo: Rotulado<string>[];
@@ -193,6 +196,7 @@ export function analisar(
     valores: [], valoresRotulados: [], datas: [], datasEmissao: [], datasVencimento: [],
     emissoresCitados: [], numerosEmissao: new Set(), cnpjs: new Set(), grupo: grupoDoNome(nome),
     paginas: paginasNoTexto(textoBruto ?? "", opcoes.paginas), valoresComRotulo: [], datasComRotulo: [],
+    bruto: textoBruto ?? "", paginasBrutas: opcoes.paginas?.length ? opcoes.paginas : [0],
   };
   if (!temTexto(doc)) {
     doc.erro = tipo === "PDF" ? "sem texto (documento escaneado/imagem: não há OCR)" : "sem texto";

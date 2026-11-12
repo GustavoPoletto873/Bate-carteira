@@ -10,6 +10,8 @@ import type { PdfJs } from "../lib/lastro/extratores";
 import { gerarExcel, lerDocumentos, montarResultado, type ArquivoEntrada } from "../lib/lastro/pipeline";
 import { periodoDoCdi } from "../lib/lastro/indexadores";
 import { lerCarteira, lerWorkpaper } from "../lib/lastro/planilhas";
+import { camposDe, type ChaveCampo } from "../lib/lastro/conciliacao";
+import { preClassificar, secoes } from "../lib/lastro/pre-classificacao";
 import { serieCdi } from "../lib/servidor/indices";
 
 const { LASTRO_WP, LASTRO_CARTEIRA, LASTRO_PASTA, LASTRO_SAIDA } = process.env;
@@ -47,6 +49,24 @@ describe.skipIf(!LASTRO_WP || !LASTRO_CARTEIRA || !LASTRO_PASTA)("arquivos reais
     const erros = new Map<string, number>();
     for (const d of r.documentos) if (d.observacao) erros.set(d.observacao, (erros.get(d.observacao) ?? 0) + 1);
     console.log("observações dos documentos:", Object.fromEntries(erros));
+    if (process.env.LASTRO_PRE) {
+      // pré-classificação das pendências: só as contagens (confiança, seções e motivos)
+      const t0 = Date.now();
+      const sugestoes = await preClassificar(r.linhas, docs);
+      const rotulos = Object.fromEntries(camposDe(r.tipo)) as Record<ChaveCampo, string>;
+      const s = secoes(sugestoes, rotulos);
+      const porConfianca = Object.fromEntries(["alta", "media", "baixa", "ambigua", "sem_candidato"].map((c) => [c, sugestoes.filter((x) => x.confianca === c).length]));
+      console.log(`pré-classificação: ${sugestoes.length} pendência(s) em ${((Date.now() - t0) / 1000).toFixed(1)}s`, porConfianca);
+      for (const g of [...s.paraDecidir, ...s.prontos]) console.log(`  [${g.motivo.decisao}] ${g.motivo.titulo}: ${g.itens.length}`);
+      console.log(`  sem documento: ${s.semPdf.length}`);
+      const semSacado = sugestoes.filter((x) => x.candidato && x.campos.emissor.marca === "P");
+      const tipos = new Map<string, number>();
+      for (const x of semSacado) {
+        const k = `${x.candidato!.tipo}/${x.candidato!.modo}/doc ${x.candidato!.detalhes.sacadoDoc.marca}`;
+        tipos.set(k, (tipos.get(k) ?? 0) + 1);
+      }
+      console.log("  sacado não achado, por tipo/modo do documento:", Object.fromEntries(tipos));
+    }
     if (LASTRO_SAIDA) writeFileSync(LASTRO_SAIDA, Buffer.from(await gerarExcel(r)));
     expect(r.linhas.length).toBeGreaterThan(0);
   }, 600_000);

@@ -1,46 +1,64 @@
 /**
- * Resumo do resultado para a tela: o que precisa de atenção, explicado em uma linha por problema.
+ * Resumo do resultado para a tela: o que precisa de atenção, uma linha curta por campo (carteira × documentos).
  * Função pura (testada); a tabela completa e o Excel continuam com todos os detalhes.
  */
 import { camposDe, type ChaveCampo, type LinhaResultado, type Situacao, type TipoCarteira } from "./conciliacao";
 
-export interface Pendencia {
+/** Um ponto de atenção do título, direto: o campo, o que está na carteira e o que o outro lado traz. */
+export interface Ponto {
   campo: string;
-  texto: string;
-  /** diverge (vermelho) ou só pede conferência (amarelo) */
-  grave: boolean;
+  /** o valor da carteira */
+  carteira: string;
+  /** o que os documentos (ou a WP_Termo) trazem de diferente; "" quando não há outro valor para mostrar */
+  outro: string;
+  lado: "documentos" | "WP_Termo";
+  /** diverge (vermelho), conferir (amarelo) ou aproximado (azul: a comparação deduziu) */
+  tipo: "diverge" | "conferir" | "aproximado";
+  /** o que mostrar quando não há outro valor: "não achado", "confirmar no documento"… */
+  semValor: string;
+  /** a explicação completa (arquivo, página, o porquê) — fica no detalhe, fora do resumo */
+  nota: string;
 }
 
-export function pendenciasDaLinha(l: LinhaResultado, campos: [ChaveCampo, string][] = camposDe("titulos")): Pendencia[] {
+/** Os valores dos documentos diferentes do da carteira, no máximo dois ("a | b +3"). */
+function outrosValores(documentos: string, carteira: string): string {
+  const outros = [...new Set(documentos.split(" | ").map((v) => v.trim()).filter((v) => v && v !== carteira))];
+  return outros.slice(0, 2).join(" | ") + (outros.length > 2 ? ` +${outros.length - 2}` : "");
+}
+
+/** O resumo do título: uma linha curta por campo com problema (carteira × documentos), o mais grave primeiro. */
+export function pontosDaLinha(l: LinhaResultado, campos: [ChaveCampo, string][] = camposDe("titulos")): Ponto[] {
   if (l.situacao === "Só no WP") {
     const vl = l.campos.valor.wp;
     return [{
-      campo: "Carteira",
-      texto: `está na WP_Termo (linha ${l.wpLinha ?? "?"}${vl ? `, VL ${vl}` : ""}) mas não na ${campos[3][1] === "Sacado" ? "carteira" : "carteira Britech"}`,
-      grave: true,
+      campo: "Carteira", carteira: "não está na carteira", outro: `linha ${l.wpLinha ?? "?"}${vl ? ` · VL ${vl}` : ""}`,
+      lado: "WP_Termo", tipo: "diverge", semValor: "", nota: "",
     }];
   }
   if (l.situacao === "OK" || l.situacao === "Sem documentos") return [];
 
-  const lista: Pendencia[] = [];
-  for (const [k, rotulo] of campos) {
+  const lista: Ponto[] = [];
+  for (const [k, campo] of campos) {
     const c = l.campos[k];
+    const base = { campo, carteira: c.britech, lado: "documentos" as const, nota: c.nota };
     if (c.status === "Diverge") {
-      const docs = c.documentos ? ` × documentos ${c.documentos}` : "";
-      lista.push({ campo: rotulo, texto: `Britech ${c.britech || "—"}${docs}${c.nota ? ` (${c.nota})` : ""}`, grave: true });
-    } else if (c.status === "Verificar" || c.status === "Não localizado") {
-      lista.push({ campo: rotulo, texto: c.nota || "não encontrado nos documentos", grave: false });
+      lista.push({ ...base, outro: outrosValores(c.documentos, c.britech), tipo: "diverge", semValor: "não está nos documentos" });
+    } else if (c.status === "Não localizado") {
+      lista.push({ ...base, outro: "", tipo: "conferir", semValor: "não achado" });
+    } else if (c.status === "Verificar") {
+      lista.push({ ...base, outro: outrosValores(c.documentos, c.britech), tipo: "conferir", semValor: c.documentos ? "confirmar no documento" : "não achado" });
     } else if (c.status === "Provável") {
-      lista.push({ campo: rotulo, texto: c.nota || "deduzido pela comparação com o documento", grave: false });
+      lista.push({ ...base, outro: outrosValores(c.documentos, c.britech), tipo: "aproximado", semValor: "confere por aproximação" });
     }
-    if (l.noWp && c.wpStatus === "Diverge") {
-      lista.push({ campo: rotulo, texto: `Britech ${c.britech || "—"} × WP_Termo ${c.wp || "em branco"}`, grave: true });
-    } else if (l.noWp && (c.wpStatus === "Verificar" || c.wpStatus === "Não localizado")) {
-      lista.push({ campo: rotulo, texto: `WP_Termo ${c.wp || "em branco"}; confira com a Britech (${c.britech || "—"})`, grave: false });
+    if (l.noWp && (c.wpStatus === "Diverge" || c.wpStatus === "Verificar" || c.wpStatus === "Não localizado")) {
+      lista.push({
+        campo, carteira: c.britech, outro: c.wp, lado: "WP_Termo", tipo: c.wpStatus === "Diverge" ? "diverge" : "conferir",
+        semValor: "em branco", nota: "",
+      });
     }
   }
-  // o mais grave primeiro, mantendo a ordem dos campos
-  return lista.sort((a, b) => Number(b.grave) - Number(a.grave));
+  const ordem = { diverge: 0, conferir: 1, aproximado: 2 };
+  return lista.sort((a, b) => ordem[a.tipo] - ordem[b.tipo]);
 }
 
 const ATENCAO: Situacao[] = ["Divergente", "Só no WP", "Verificar"];

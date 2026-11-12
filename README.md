@@ -152,6 +152,24 @@ documentos lidos (sem acento/maiúsculas; "1234,56" acha "1.234,56"), mostra a p
 **vincular** a pendência ao documento campo a campo — V (confere), D (divergente), P (sem valor no documento). A marca
 de quem confere vale mais que a automática e entra no resumo e no Excel.
 
+### Pré-classificação das pendências
+
+Adaptada da branch `feat/pre-classificacao-bater-pdf` do bate-lastro. **Pré-classificar pendências** analisa todas as
+pendências de uma vez e sugere, para cada uma, o documento (a página ou a linha da tabela do termo/borderô), a
+**confiança** (alta, média, baixa, ambígua, sem candidato) e a marca de cada campo — V, D (com o valor do documento) ou
+P (não achado) —, com a evidência e a regra. A conferência é em lote: os títulos com o mesmo motivo ficam no mesmo grupo
+("Tudo confere", "o documento traz outro Vencimento", "Sacado: o termo da duplicata não traz — vale a carteira"…),
+separados em **Para decidir** (nada vem marcado) e **Prontos para aplicar** (já vêm marcados). Cada cartão mostra o
+recorte do PDF com os valores destacados e os campos clicáveis procuram o valor nos PDFs. **Nada é gravado sem clique**:
+"Aplicar" grava as marcas como os vínculos do Bater PDF.
+
+O motor (`lib/lastro/pre-classificacao.ts`, `lib/lastro/formas.ts`) reconhece as formas de impressão (datas por extenso,
+moeda BR/US, CPF/CNPJ com o zero perdido, número com o sufixo da parcela, códigos alfanuméricos), acha as âncoras do
+título (número, CPF/CNPJ, valor), escolhe a linha da tabela quando a página tem vários títulos, ignora listagens de muitos
+devedores e o bilhete de seguro prestamista e aplica as regras do bate-lastro (CNPJ da mesma raiz, vencimento um dia
+antes, parcela do cronograma, nome parcial ao lado do CPF, nome cortado na carteira, termo de duplicata sem o sacado).
+Fica de fora o que lá depende do banco: leituras de IA, outras bases do fundo e o aprendizado com o que o time já conferiu.
+
 ### Como os documentos são ligados a cada título
 
 - **direto**: o documento traz o VL Aplic. exato (tolerância de R$ 0,01);

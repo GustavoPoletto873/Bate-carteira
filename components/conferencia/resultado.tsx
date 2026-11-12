@@ -1,14 +1,16 @@
 "use client";
 
-import { ChevronDown, Download, FileSearch, FileText, Link2 } from "lucide-react";
+import { ChevronDown, Download, FileSearch, FileText, Link2, Sparkles } from "lucide-react";
 import { Fragment, useCallback, useMemo, useState } from "react";
 import type { Comparacao, Relacao } from "@/lib/lastro/comparacao";
 import { camposDe, type Campo, type ChaveCampo, type LinhaResultado, type Situacao } from "@/lib/lastro/conciliacao";
 import type { ResultadoCompleto } from "@/lib/lastro/pipeline";
 import { aplicarVinculos, type Vinculo } from "@/lib/lastro/marcacoes";
-import { pendenciasDaLinha, resumirParaTela } from "@/lib/lastro/resumo";
+import { pendentes } from "@/lib/lastro/pre-classificacao";
+import { pontosDaLinha, resumirParaTela } from "@/lib/lastro/resumo";
 import { cn } from "@/lib/utils";
 import { BaterPdf } from "./bater-pdf";
+import { ConferenciaPreClassificacao } from "./pre-classificacao";
 import { Alternador } from "./comum";
 import { ValidacaoDaCarteira } from "./validacao";
 import { corDoStatus, Status } from "./status";
@@ -91,9 +93,9 @@ function CelulaWp({ l }: { l: LinhaResultado }) {
   );
 }
 
-function Detalhe({ l, campos, semNotas = false }: { l: LinhaResultado; campos: Campos; semNotas?: boolean }) {
+function Detalhe({ l, campos }: { l: LinhaResultado; campos: Campos }) {
   const rotulos = Object.fromEntries(campos) as Record<string, string>;
-  const notas = semNotas ? [] : campos.filter(([k]) => l.campos[k].nota).map(([k, rot]) => `${rot}: ${l.campos[k].nota}`);
+  const notas = campos.filter(([k]) => l.campos[k].nota).map(([k, rot]) => `${rot}: ${l.campos[k].nota}`);
   return (
     <div className="space-y-3 px-3 pb-5 pt-1">
       {notas.length > 0 && (
@@ -266,60 +268,86 @@ const ROTULO_PARTE: Record<Situacao, (n: number) => string> = {
   OK: (n) => (n === 1 ? "confere" : "conferem"),
 };
 
-/** Um título que precisa de atenção: o que está errado, uma linha por problema; as evidências abrem embaixo. */
+const COR_PONTO = { diverge: "bg-erro", conferir: "bg-aviso", aproximado: "bg-sky-400" } as const;
+const COR_OUTRO = { diverge: "text-erro", conferir: "text-aviso", aproximado: "text-sky-300" } as const;
+
+/**
+ * Um título que precisa de atenção, direto ao ponto: uma linha por campo — o que está na carteira × o que os
+ * documentos (ou a WP_Termo) trazem. O porquê, as comparações e as evidências abrem em "Detalhes".
+ */
 function CartaoAtencao({ l, campos, onBaterPdf }: { l: LinhaResultado; campos: Campos; onBaterPdf: (l: LinhaResultado) => void }) {
   const [aberto, setAberto] = useState(false);
-  const pendencias = pendenciasDaLinha(l, campos);
+  const pontos = pontosDaLinha(l, campos);
   const rec = campos[3][1] === "Sacado";
   const vl = l.campos.valor.britech || l.campos.valor.wp;
-  const sub = [
-    rec ? l.emissor && `sacado ${l.emissor}` : l.ativo && l.emissor, rec && l.cedente && `cedente ${l.cedente}`,
-    vl && `${rec ? "valor" : "VL"} ${vl}`, !rec && l.codigo && `cód. ${l.codigo}`, l.noWp && `WP_Termo linha ${l.wpLinha}`,
-  ]
-    .filter(Boolean).join(" · ");
+  const sub = [rec && l.emissor, vl && `${rec ? "valor" : "VL"} ${vl}`, l.noWp && `WP_Termo linha ${l.wpLinha}`].filter(Boolean).join(" · ");
   return (
-    <li className="rounded-2xl border border-border bg-card">
-      <div className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:gap-5 md:p-5">
-        <Status status={l.situacao} className="self-start md:mt-0.5" />
-        <div className="min-w-0 flex-1 space-y-2.5">
-          <div>
-            <p className="font-medium text-creme">{l.ativo || l.emissor || "—"}</p>
-            {sub && <p className="mt-0.5 text-xs text-creme/50">{sub}</p>}
-            {l.manual && (
-              <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-sky-300"><Link2 className="size-3.5" /> vinculado à mão: {l.manual}</p>
-            )}
-          </div>
-          <ul className="space-y-1 text-sm">
-            {pendencias.map((p, i) => (
-              <li key={i} className="flex gap-2.5">
-                <span className={cn("mt-[0.45rem] size-1.5 shrink-0 rounded-full", p.grave ? "bg-erro" : "bg-aviso")} />
-                <span><span className="font-medium text-creme/85">{p.campo}:</span> <span className="text-creme/65">{p.texto}</span></span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
-          <button
-            type="button"
-            onClick={() => onBaterPdf(l)}
-            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-creme/80 ring-1 ring-creme/20 hover:bg-creme/[0.06]"
-          >
-            <FileSearch className="size-4" /> Bater PDF
-          </button>
-          {(l.evidencias.length > 0 || l.comparacoes.length > 0) && (
+    <li className="rounded-xl border border-border bg-card" data-cartao={l.id}>
+      <div className="px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <Status status={l.situacao} />
+          <p className="min-w-0 flex-1 truncate font-medium text-creme" title={l.ativo || l.emissor}>{l.ativo || l.emissor || "—"}</p>
+          {sub && <p className="hidden max-w-[40%] truncate text-xs text-creme/45 lg:block" title={sub}>{sub}</p>}
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onBaterPdf(l)}
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-creme/75 ring-1 ring-creme/15 hover:bg-creme/[0.06]"
+            >
+              <FileSearch className="size-3.5" /> Bater PDF
+            </button>
             <button
               type="button"
               onClick={() => setAberto((a) => !a)}
-              className="inline-flex items-center gap-1.5 text-sm text-creme/60 underline-offset-4 hover:text-creme hover:underline"
+              aria-expanded={aberto}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs text-creme/55 hover:bg-creme/[0.06] hover:text-creme"
             >
-              {aberto ? "Esconder" : `Comparações (${l.comparacoes.length}) e evidências (${l.evidencias.length})`}
-              <ChevronDown className={cn("size-4 transition-transform", aberto && "rotate-180")} />
+              Detalhes <ChevronDown className={cn("size-3.5 transition-transform", aberto && "rotate-180")} />
             </button>
-          )}
+          </div>
         </div>
+        {sub && <p className="mt-0.5 truncate text-xs text-creme/45 lg:hidden">{sub}</p>}
+        <ul className="mt-2 space-y-1 text-sm">
+          {pontos.map((p, i) => (
+            <li key={i} className="grid grid-cols-[0.375rem_minmax(0,1fr)] items-baseline gap-x-2.5 sm:grid-cols-[0.375rem_8rem_minmax(0,1fr)]">
+              <span className={cn("size-1.5 translate-y-[-0.1rem] rounded-full", COR_PONTO[p.tipo])} />
+              <span className="text-creme/55">{p.campo}</span>
+              <span className="col-start-2 truncate tabular-nums sm:col-start-auto" title={`${p.carteira || "—"} × ${p.lado === "WP_Termo" ? "WP_Termo " : ""}${p.outro || p.semValor}`}>
+                <span className="text-creme">{p.carteira || "—"}</span>
+                <span className="px-2 text-creme/30">×</span>
+                {p.lado === "WP_Termo" && <span className="text-creme/45">WP_Termo </span>}
+                <span className={p.outro ? COR_OUTRO[p.tipo] : "text-creme/45"}>{p.outro || p.semValor}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+        {l.manual && (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-sky-300"><Link2 className="size-3.5" /> vinculado à mão: {l.manual}</p>
+        )}
       </div>
-      {aberto && <div className="border-t border-border pt-4"><Detalhe l={l} campos={campos} semNotas /></div>}
+      {aberto && <div className="border-t border-border pt-4"><Detalhe l={l} campos={campos} /></div>}
     </li>
+  );
+}
+
+/** Lista de cartões em blocos (50 por vez), para a tela não pesar com centenas de títulos. */
+function ListaDeCartoes({ linhas, campos, onBaterPdf }: { linhas: LinhaResultado[]; campos: Campos; onBaterPdf: (l: LinhaResultado) => void }) {
+  const [mostrar, setMostrar] = useState(50);
+  return (
+    <div className="space-y-2">
+      <ul className="space-y-2">
+        {linhas.slice(0, mostrar).map((l) => <CartaoAtencao key={l.id} l={l} campos={campos} onBaterPdf={onBaterPdf} />)}
+      </ul>
+      {linhas.length > mostrar && (
+        <button
+          type="button"
+          onClick={() => setMostrar((n) => n + 100)}
+          className="w-full rounded-xl px-4 py-2.5 text-sm text-creme/70 ring-1 ring-creme/15 hover:bg-creme/[0.06]"
+        >
+          Mostrar mais ({linhas.length - mostrar} restantes)
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -365,6 +393,7 @@ export function Resultado({ resultado, onBaixar, baixando }: {
   const [vista, setVista] = useState<"resumo" | "tabela">("resumo");
   const [vinculos, setVinculos] = useState<Map<number, Vinculo>>(() => new Map());
   const [bater, setBater] = useState<{ linhaId: number | null; termo: string } | null>(null);
+  const [preAberta, setPreAberta] = useState(false);
   // os vínculos feitos à mão no Bater PDF valem mais que a conferência automática (tela e Excel)
   const r = useMemo(() => ({ ...resultado, linhas: aplicarVinculos(resultado.linhas, vinculos) }), [resultado, vinculos]);
   const s = r.resumo;
@@ -375,6 +404,8 @@ export function Resultado({ resultado, onBaixar, baixando }: {
     (rec && l.codigo.length >= 3 ? l.codigo : "") || l.campos.valor.britech.split(" ")[0] || l.emissor.split(" ").slice(0, 2).join(" ");
   const abrirBater = (l: LinhaResultado | null) => setBater({ linhaId: l?.id ?? null, termo: l ? termoDe(l) : "" });
   const fecharBater = useCallback(() => setBater(null), []);
+  const fecharPre = useCallback(() => setPreAberta(false), []);
+  const nPendentes = useMemo(() => pendentes(r.linhas).length, [r.linhas]);
 
   return (
     <div className="space-y-6">
@@ -418,9 +449,21 @@ export function Resultado({ resultado, onBaixar, baixando }: {
           />
         </div>
         {r.docs.length > 0 && (
-          <button type="button" onClick={() => abrirBater(null)} className="inline-flex items-center gap-2 self-start rounded-full px-4 py-2 text-sm text-creme/80 ring-1 ring-creme/20 hover:bg-creme/[0.06] sm:self-auto">
-            <FileSearch className="size-4" /> Buscar nos PDFs
-          </button>
+          <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+            <button type="button" onClick={() => abrirBater(null)} className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-creme/80 ring-1 ring-creme/20 hover:bg-creme/[0.06]">
+              <FileSearch className="size-4" /> Buscar nos PDFs
+            </button>
+            {nPendentes > 0 && (
+              <button
+                type="button"
+                onClick={() => setPreAberta(true)}
+                title="Sugere o documento e a marca de cada campo das pendências, para conferir em lote"
+                className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-creme/80 ring-1 ring-primary/50 hover:bg-primary/10"
+              >
+                <Sparkles className="size-4 text-primary" /> Pré-classificar pendências ({nPendentes})
+              </button>
+            )}
+          </div>
         )}
         <p className="text-xs text-creme/45">
           {s.posicoesBritech} {rec ? "recebível(is) na carteira" : "título(s) na Britech"} · {s.linhasWpTermo} na WP_Termo · {s.documentosLidos} documento(s) lido(s)
@@ -432,9 +475,14 @@ export function Resultado({ resultado, onBaixar, baixando }: {
       {vista === "resumo" ? (
         <div className="space-y-4">
           {tela.atencao.length > 0 ? (
-            <ul className="space-y-3">
-              {tela.atencao.map((l) => <CartaoAtencao key={l.id} l={l} campos={campos} onBaterPdf={abrirBater} />)}
-            </ul>
+            <>
+              <p className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-creme/45">
+                <span>Em cada linha: {rec ? "carteira" : "Britech"} × documentos</span>
+                <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-erro" /> diverge</span>
+                <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-aviso" /> conferir</span>
+              </p>
+              <ListaDeCartoes linhas={tela.atencao} campos={campos} onBaterPdf={abrirBater} />
+            </>
           ) : (
             <p className="rounded-2xl border border-ok/25 bg-ok/[0.05] px-5 py-4 text-sm text-creme/75">
               Nenhum título diverge da Britech, dos documentos ou da WP_Termo.
@@ -451,12 +499,9 @@ export function Resultado({ resultado, onBaixar, baixando }: {
               </summary>
               <div className="space-y-3 border-t border-border p-3">
                 <p className="px-2 text-xs text-creme/50">
-                  Não bateram campo a campo, mas a comparação deduz o valor ou a data: aparece em outro campo do documento, sem rótulo,
-                  com pequena diferença ou pela conta da taxa. Veja de onde veio cada lado em &quot;Comparações&quot;.
+                  A comparação deduz o valor ou a data (outro campo do documento, sem rótulo, pequena diferença ou conta da taxa). O porquê está em &quot;Detalhes&quot;.
                 </p>
-                <ul className="space-y-3">
-                  {tela.provaveis.map((l) => <CartaoAtencao key={l.id} l={l} campos={campos} onBaterPdf={abrirBater} />)}
-                </ul>
+                <ListaDeCartoes linhas={tela.provaveis} campos={campos} onBaterPdf={abrirBater} />
               </div>
             </details>
           )}
@@ -472,6 +517,22 @@ export function Resultado({ resultado, onBaixar, baixando }: {
         </div>
       ) : (
         <TabelaCompleta resultado={r} onBaterPdf={abrirBater} />
+      )}
+
+      {preAberta && (
+        <ConferenciaPreClassificacao
+          resultado={r}
+          linhas={r.linhas}
+          campos={campos}
+          pausado={!!bater}
+          onAplicar={(pares) => setVinculos((m) => {
+            const n = new Map(m);
+            for (const [id, v] of pares) n.set(id, v);
+            return n;
+          })}
+          onBuscar={(l, termo) => setBater({ linhaId: l.id, termo })}
+          onFechar={fecharPre}
+        />
       )}
 
       {bater && (
