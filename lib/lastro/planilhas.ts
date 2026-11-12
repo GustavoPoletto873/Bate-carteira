@@ -202,6 +202,9 @@ export interface Posicao {
   emissor: string;
   /** cedente do recebível ("" no título) */
   cedente: string;
+  /** CPF/CNPJ do sacado e do cedente do recebível (DOC_SACADO, DOC_CEDENTE), como vieram no arquivo */
+  docSacado?: string;
+  docCedente?: string;
   /** VL Aplic.; no recebível, o valor de aquisição (ou o nominal, se o arquivo não tiver aquisição) */
   valorAplicado: number;
   /** valor de face do recebível — é o que aparece na duplicata/CCB (null no título) */
@@ -336,7 +339,9 @@ const COLUNAS_RECEBIVEIS: Record<string, string[]> = {
   seuNumero: ["seu numero"],
   tipo: ["tipo recebivel", "tipo de recebivel"],
   sacado: ["nome sacado", "nome do sacado", "sacado"],
+  docSacado: ["doc sacado", "documento sacado", "cpf cnpj sacado", "cnpj cpf sacado", "cpf sacado", "cnpj sacado"],
   cedente: ["nome cedente", "nome do cedente", "cedente"],
+  docCedente: ["doc cedente", "documento cedente", "cpf cnpj cedente", "cnpj cpf cedente", "cnpj cedente"],
   valorAquisicao: ["valor aquisicao", "valor de aquisicao", "vl aquisicao"],
   valorNominal: ["valor nominal", "valor de face", "vl nominal"],
   valorPresente: ["valor presente", "vl presente"],
@@ -390,6 +395,7 @@ export function recebiveisDaTabela(linhas: Linha[], primeira = 1): Posicao[] {
     posicoes.push({
       linha: primeira + iCab + 1 + k, tipo: "recebivel", codigo: numero,
       ativo: [tipo || "Recebível", numero].filter(Boolean).join(" "), emissor: sacado, cedente: texto(col("cedente")),
+      docSacado: texto(col("docSacado")), docCedente: texto(col("docCedente")),
       valorAplicado: valor, valorNominal: nominal, valorPresente: paraCentavos(col("valorPresente")),
       dataAquisicao: paraData(col("dataAquisicao")), dataEmissao: paraData(col("dataEmissao")),
       dataVencimento: paraData(col("dataVencimento")), grupo: tipo,

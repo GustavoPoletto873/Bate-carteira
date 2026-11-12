@@ -73,6 +73,23 @@ export interface LinhaResultado {
   comparacoes: Comparacao[];
   /** documento vinculado à mão no Bater PDF (a marca de quem confere vence a automática) */
   manual?: string;
+  /** dados do título como vieram da carteira, para a pré-classificação (pre-classificacao.ts) */
+  dados?: DadosDoTitulo;
+}
+
+/** O título como veio da carteira: o que a pré-classificação procura nos documentos. Valores em centavos. */
+export interface DadosDoTitulo {
+  numero: string;
+  sacado: string;
+  docSacado: string;
+  cedente: string;
+  docCedente: string;
+  nominal: number | null;
+  aquisicao: number | null;
+  emissao: string | null;
+  vencimento: string | null;
+  /** tipo do recebível (Duplicata, CCB…) ou do título */
+  tipo: string;
 }
 
 export interface ItemInventario {
@@ -524,6 +541,12 @@ export function conferir(
       dataAquisicao: fmtData(pos.dataAquisicao), noWp: !!w, wpLinha: w?.linhaExcel ?? null,
       situacao: situacaoDe(campos, !!w), campos, docsDiretos: v.direto.length,
       docsMesmaOperacao: v["mesma operação"].length, evidencias: evid, comparacoes,
+      dados: {
+        numero: pos.codigo, sacado: pos.emissor, docSacado: pos.docSacado ?? "", cedente: pos.cedente, docCedente: pos.docCedente ?? "",
+        nominal: pos.valorNominal, aquisicao: pos.tipo === "recebivel" && pos.valorNominal !== null && pos.colunas?.valorAplicado === pos.colunas?.valorNominal
+          ? null : pos.valorAplicado,
+        emissao: pos.dataEmissao, vencimento: pos.dataVencimento, tipo: pos.grupo || pos.ativo,
+      },
     });
   });
 
