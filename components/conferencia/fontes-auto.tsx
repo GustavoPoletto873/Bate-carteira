@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArquivoEntrada } from "@/lib/lastro/pipeline";
 import { opcoesDeCarteira, type OpcaoCarteira } from "@/lib/lastro/carteiras";
 import { DicaAdministradora } from "@/components/guia-administradoras";
+import { EVENTO_LISTA_FUNDOS } from "@/components/tour";
 import { dataDoTrimestre, type Administradora, type ProvedorDrive } from "@/lib/lastro/drive-comum";
 import { lerWorkpaper, workpaperDaAmostra, type Workpaper } from "@/lib/lastro/planilhas";
 import {
@@ -29,6 +30,13 @@ function SeletorFundo({ fundos, carregando, erro, escolhido, onEscolher }: {
 }) {
   const [filtro, setFiltro] = useState("");
   const [aberto, setAberto] = useState(false);
+  // o tour guiado abre a lista para mostrar como escolher o fundo (e fecha ao sair do passo)
+  const [peloTour, setPeloTour] = useState(false);
+  useEffect(() => {
+    const mudar = (e: Event) => setPeloTour((e as CustomEvent<boolean>).detail);
+    window.addEventListener(EVENTO_LISTA_FUNDOS, mudar);
+    return () => window.removeEventListener(EVENTO_LISTA_FUNDOS, mudar);
+  }, []);
   const lista = useMemo(() => {
     const termo = normalizar(filtro);
     const digitos = filtro.replace(/\D/g, "");
@@ -56,8 +64,8 @@ function SeletorFundo({ fundos, carregando, erro, escolhido, onEscolher }: {
         {carregando && <Loader2 className="size-4 animate-spin text-creme/50" />}
       </label>
       {erro && <p className="mt-2 text-sm text-erro">{erro}</p>}
-      {aberto && !carregando && (
-        <ul className="absolute z-30 mt-2 max-h-80 w-full overflow-auto rounded-xl border border-border bg-popover p-1 shadow-2xl">
+      {(aberto || peloTour) && !carregando && (
+        <ul className="absolute z-30 mt-2 max-h-80 w-full overflow-auto rounded-xl border border-border bg-popover p-1 shadow-2xl" data-tour="lista-fundos">
           {lista.length === 0 && <li className="px-3 py-2 text-sm text-creme/50">Nenhum fundo com esse nome ou CNPJ.</li>}
           {lista.map((f) => (
             <li key={f.caminho}>
@@ -67,6 +75,7 @@ function SeletorFundo({ fundos, carregando, erro, escolhido, onEscolher }: {
                 onClick={() => {
                   setFiltro("");
                   setAberto(false);
+                  setPeloTour(false);
                   onEscolher(f);
                 }}
                 className={cn("w-full rounded-lg px-3 py-2 text-left hover:bg-creme/[0.06]", escolhido?.caminho === f.caminho && "bg-creme/[0.06]")}

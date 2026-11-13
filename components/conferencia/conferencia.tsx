@@ -314,7 +314,7 @@ export function Conferencia() {
         {servidorInfo.carregando ? (
           <p className="inline-flex items-center gap-2 text-sm text-creme/60"><Loader2 className="size-4 animate-spin" /> Carregando…</p>
         ) : modo === "auto" && fonteDrive === "pasta" && !pastaBase ? (
-          <div className="flex flex-col items-start gap-4 rounded-2xl border border-border bg-card p-6 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col items-start gap-4 rounded-2xl border border-border bg-card p-6 md:flex-row md:items-center md:justify-between" data-tour="escolher-pasta">
             <div className="max-w-2xl space-y-1">
               <p className="text-lg font-medium text-creme">Escolha a pasta do trimestre neste computador</p>
               <p className="text-sm text-creme/60">
