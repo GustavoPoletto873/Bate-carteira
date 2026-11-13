@@ -46,7 +46,7 @@ function SeletorFundo({ fundos, carregando, erro, escolhido, onEscolher }: {
   }, [fundos, filtro]);
 
   return (
-    <div className="relative">
+    <div className="relative" data-tour="busca-fundo">
       <label className="flex items-center gap-2 rounded-xl border border-border bg-creme/[0.04] px-3 py-2 focus-within:border-creme/40">
         <Search className="size-4 shrink-0 text-creme/50" />
         <input
@@ -369,7 +369,7 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
           descricao={<>Escolha o fundo: o app abre o <code className="text-creme/80">WP_&lt;fundo&gt;_&lt;cnpj&gt;.xlsm</code> de <code className="text-creme/80">_Workpapers</code> e usa a aba <b className="font-medium text-creme/80">WP_Termo</b>.</>}
         >
           {adms.length > 1 && (
-            <label className="flex items-center gap-3 text-sm text-creme/70">
+            <label className="flex items-center gap-3 text-sm text-creme/70" data-tour="administradora">
               <span className="shrink-0">Administradora</span>
               <select value={baseAplicada} onChange={(e) => trocarAdministradora(e.target.value)} className={classeSelect} data-campo="administradora">
                 {adms.map((a) => <option key={a.base} value={a.base}>{a.nome}</option>)}
@@ -423,19 +423,21 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
               ? <>Estoque de direitos creditórios do fundo na data-base, pela API do Fromtis da administradora (o mesmo do hub).</>
               : <>Do Drive: a carteira Britech já baixada (<code className="text-creme/80">_Carteiras\FORMATADA</code>) ou, nas administradoras sem Britech, a amostra (<code className="text-creme/80">_Amostra</code>) ou o estoque (<code className="text-creme/80">_Insumos</code>) do fundo.</>}
         >
-          <Alternador
-            valor={modoCarteira}
-            onMudar={(m) => {
-              onMudar();
-              setModoCarteira(m);
-            }}
-            opcoes={[
-              { valor: "api", rotulo: "API Britech" },
-              { valor: "drive", rotulo: "Arquivo no Drive" },
-              ...(admsSinqia.length ? [{ valor: "sinqia" as const, rotulo: "Sinqia" }] : []),
-              ...(admsFromtis.length ? [{ valor: "fromtis" as const, rotulo: "Fromtis" }] : []),
-            ]}
-          />
+          <div data-tour="fonte-carteira">
+            <Alternador
+              valor={modoCarteira}
+              onMudar={(m) => {
+                onMudar();
+                setModoCarteira(m);
+              }}
+              opcoes={[
+                { valor: "api", rotulo: "API Britech" },
+                { valor: "drive", rotulo: "Arquivo no Drive" },
+                ...(admsSinqia.length ? [{ valor: "sinqia" as const, rotulo: "Sinqia" }] : []),
+                ...(admsFromtis.length ? [{ valor: "fromtis" as const, rotulo: "Fromtis" }] : []),
+              ]}
+            />
+          </div>
           {!wp ? (
             <p className="text-xs text-creme/45">Escolha o fundo primeiro.</p>
           ) : modoCarteira === "api" ? (
