@@ -13,7 +13,9 @@ import { lerCarteira } from "@/lib/lastro/planilhas";
 import { provedorLocal, salvarChave, servidor, type StatusServidor } from "@/lib/lastro/servidor-cliente";
 import { cn } from "@/lib/utils";
 import { Alternador, classeSelect, mensagem } from "./comum";
+import { EVENTO_DEMONSTRACAO } from "@/components/tour";
 import { FontesAuto } from "./fontes-auto";
+import { FontesDemo } from "./fontes-demo";
 import { FontesManuais } from "./fontes-manuais";
 import { Inventario, Resultado } from "./resultado";
 import type { Preparo } from "./tipos";
@@ -52,6 +54,13 @@ export function Conferencia() {
   const [erroPasta, setErroPasta] = useState("");
   const [abrindoPasta, setAbrindoPasta] = useState(false);
   const provedorPasta = useMemo(() => (pastaBase ? criarProvedorPasta(pastaBase) : null), [pastaBase]);
+  // o tour guiado pede os cartões de exemplo enquanto a pasta do trimestre não foi escolhida
+  const [demonstracao, setDemonstracao] = useState(false);
+  useEffect(() => {
+    const mudar = (e: Event) => setDemonstracao((e as CustomEvent<boolean>).detail);
+    window.addEventListener(EVENTO_DEMONSTRACAO, mudar);
+    return () => window.removeEventListener(EVENTO_DEMONSTRACAO, mudar);
+  }, []);
 
   useEffect(() => {
     let vivo = true;
@@ -313,6 +322,8 @@ export function Conferencia() {
 
         {servidorInfo.carregando ? (
           <p className="inline-flex items-center gap-2 text-sm text-creme/60"><Loader2 className="size-4 animate-spin" /> Carregando…</p>
+        ) : modo === "auto" && fonteDrive === "pasta" && !pastaBase && demonstracao ? (
+          <FontesDemo />
         ) : modo === "auto" && fonteDrive === "pasta" && !pastaBase ? (
           <div className="flex flex-col items-start gap-4 rounded-2xl border border-border bg-card p-6 md:flex-row md:items-center md:justify-between" data-tour="escolher-pasta">
             <div className="max-w-2xl space-y-1">

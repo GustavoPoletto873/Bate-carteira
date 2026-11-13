@@ -5,6 +5,8 @@ import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 
 /** O tour manda este evento (detail true/false) para abrir e fechar a lista de fundos do cartão Fundo. */
 export const EVENTO_LISTA_FUNDOS = "lastro:tour-lista-fundos";
+/** O tour manda este evento (detail true/false) para mostrar os cartões de exemplo enquanto a pasta não foi escolhida. */
+export const EVENTO_DEMONSTRACAO = "lastro:tour-demonstracao";
 
 interface Passo {
   /** o primeiro seletor que existir na tela é destacado */
@@ -23,6 +25,10 @@ interface Passo {
   incluir?: string[];
   /** o passo espera o usuário agir no bloco: quando este seletor aparecer, o tour segue sozinho */
   avancaQuando?: string;
+  /** sem a pasta do trimestre escolhida, o passo usa os cartões de exemplo (FontesDemo) */
+  demonstracao?: boolean;
+  /** também entra no tour se este seletor estiver na tela (o passo da pasta, enquanto o exemplo está no lugar do painel) */
+  ouCom?: string;
 }
 
 const PASSOS: Passo[] = [
@@ -34,16 +40,40 @@ const PASSOS: Passo[] = [
   {
     seletores: ['[data-tour="escolher-pasta"]'],
     opcional: true,
+    ouCom: "[data-demo]",
     avancaQuando: '[data-tour="cartao-01"]',
     titulo: "Escolha a pasta do trimestre",
-    texto: "Por aqui, o app lê o Drive pela pasta que você escolher no G:. Clique em \"Escolher pasta\" (ou \"Usar a última\") e permita a leitura: o tour segue sozinho e mostra como escolher o fundo.",
+    texto: "Por aqui, o app lê o Drive pela pasta que você escolher no G:. Clique em \"Escolher pasta\" (ou \"Usar a última\") para ver os seus fundos, ou siga para ver os cartões num exemplo.",
   },
   {
     seletores: ['[data-tour="cartao-01"]:has([data-campo="busca-fundo"])'],
     opcional: true,
+    demonstracao: true,
+    titulo: "1 · Fundo",
+    texto: "Tudo começa pelo fundo que você vai conferir. Com o fundo escolhido, o app acha sozinho o workpaper, a carteira e a pasta de lastro.",
+  },
+  {
+    seletores: ['[data-tour="administradora"]'],
+    opcional: true,
+    demonstracao: true,
+    titulo: "Administradora",
+    texto: "Uma por pasta dentro do trimestre (PLANNER, ID, AZUMI…). Trocar a administradora troca a lista de fundos.",
+  },
+  {
+    seletores: ['[data-tour="dica-administradora"]'],
+    opcional: true,
+    demonstracao: true,
+    abrir: true,
+    titulo: "Como funciona na administradora",
+    texto: "Cada administradora tem fontes diferentes: aqui está o que já funciona, o que ainda não roda e por quê, e como conferir hoje. Troque a administradora e o painel acompanha.",
+  },
+  {
+    seletores: ['[data-tour="busca-fundo"]'],
+    opcional: true,
+    demonstracao: true,
     evento: EVENTO_LISTA_FUNDOS,
     incluir: ['[data-tour="lista-fundos"]'],
-    titulo: "1 · Fundo",
+    titulo: "Buscar o fundo",
     texto: "Os fundos da administradora, tirados dos workpapers. Busque pelo nome ou CNPJ e clique num fundo: o app abre o workpaper e lê a WP_Termo, o CNPJ e a data-base. \"Sem workpaper\" é fundo que só tem a amostra.",
   },
   {
@@ -54,27 +84,30 @@ const PASSOS: Passo[] = [
     texto: "Escolha o WP_<fundo>_<cnpj>.xlsm (ou arraste para o cartão). O app lê a WP_Termo, o CNPJ e a data-base.",
   },
   {
-    seletores: ['[data-tour="dica-administradora"]', '[data-campo="administradora"]'],
-    opcional: true,
-    abrir: true,
-    titulo: "Cada administradora é diferente",
-    texto: "De onde vem a carteira muda de uma administradora para outra. \"Como funciona na…\" mostra o que já funciona, o que ainda não roda e por quê, e como conferir hoje. Troque a administradora e o painel acompanha.",
-  },
-  {
     seletores: ['[data-tour="cartao-02"]'],
     opcional: true,
+    demonstracao: true,
     titulo: "2 · Carteira",
-    texto: "De onde vem a carteira: API da Britech, arquivo no Drive (carteira formatada, amostra ou estoque) ou Fromtis. Buscando pelo fundo, o app já escolhe a melhor fonte; troque aqui se precisar.",
+    texto: "A carteira do fundo na data-base, que o app compara com a WP_Termo e com os documentos. Buscando pelo fundo, o app já escolhe a melhor fonte.",
+  },
+  {
+    seletores: ['[data-tour="fonte-carteira"]'],
+    opcional: true,
+    demonstracao: true,
+    titulo: "De onde vem a carteira",
+    texto: "API Britech: direto da Britech da administradora, pelo CNPJ. Arquivo no Drive: a carteira formatada, a amostra ou o estoque da pasta (fundo de recebíveis começa na amostra). Fromtis e Sinqia aparecem nas administradoras que usam esses sistemas.",
   },
   {
     seletores: ['[data-tour="cartao-03"]'],
     opcional: true,
+    demonstracao: true,
     titulo: "3 · Lastro e termo",
-    texto: "A pasta com os documentos do fundo. Buscando pelo fundo, o app sugere a de nome mais parecido; confira se é a certa antes de seguir.",
+    texto: "A pasta com os documentos do fundo (PDF, boletas HTML, DOCX e TXT). O app sugere a de nome mais parecido com o fundo; confira se é a certa.",
   },
   {
     seletores: ['[data-tour="conferir"]'],
     opcional: true,
+    demonstracao: true,
     titulo: "Conferir",
     texto: "Com as três fontes prontas, clique em Conferir. Os documentos são lidos no seu navegador; pastas grandes levam alguns minutos e a barra mostra o andamento.",
   },
@@ -151,6 +184,9 @@ function retanguloDe(p: Passo): DOMRect | null {
 /** O passo entra no tour? Decidido na hora, pelo que está na tela (sem resultado, os blocos do resultado viram um passo só). */
 function cabe(p: Passo): boolean {
   if (p.soSem && achar(p.soSem)) return false;
+  if (p.ouCom && achar(p.ouCom)) return true;
+  // sem a pasta, os cartões de exemplo entram no lugar do painel "Escolha a pasta do trimestre"
+  if (p.demonstracao && (achar('[data-tour="escolher-pasta"]') || achar("[data-demo]"))) return true;
   return !p.opcional || !!alvoDe(p);
 }
 
@@ -221,6 +257,8 @@ export function Tour() {
       el.open = true;
       abriu = el;
     }
+    // os eventos de passos seguidos se anulam no mesmo commit (sai false, entra true): o exemplo não pisca entre passos
+    if (p.demonstracao) window.dispatchEvent(new CustomEvent(EVENTO_DEMONSTRACAO, { detail: true }));
     if (p.evento) window.dispatchEvent(new CustomEvent(p.evento, { detail: true }));
 
     let alturaPosicionada = 0;
@@ -257,6 +295,7 @@ export function Tour() {
       window.removeEventListener("resize", medir);
       if (abriu) abriu.open = false;
       if (p.evento) window.dispatchEvent(new CustomEvent(p.evento, { detail: false }));
+      if (p.demonstracao) window.dispatchEvent(new CustomEvent(EVENTO_DEMONSTRACAO, { detail: false }));
     };
   }, [passo, medir]);
 
@@ -288,7 +327,6 @@ export function Tour() {
   const p = PASSOS[passo];
   const anterior = vizinho(passo, -1);
   const proximo = vizinho(passo, 1);
-  const esperando = !!p.avancaQuando && !achar(p.avancaQuando);
   const visiveis = PASSOS.map((x, i) => i === passo || cabe(x));
   const posicao = visiveis.slice(0, passo + 1).filter(Boolean).length;
   const total = visiveis.filter(Boolean).length;
@@ -329,15 +367,9 @@ export function Tour() {
                 Voltar
               </button>
             )}
-            {esperando ? (
-              <button type="button" onClick={() => setPasso(proximo)} className="rounded-full px-3 py-1.5 text-sm text-creme/75 ring-1 ring-creme/20 hover:bg-creme/[0.06]">
-                Pular
-              </button>
-            ) : (
-              <button type="button" onClick={() => setPasso(proximo)} className="rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-black">
-                {proximo === null ? "Concluir" : "Próximo"}
-              </button>
-            )}
+            <button type="button" onClick={() => setPasso(proximo)} className="rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-black">
+              {proximo === null ? "Concluir" : "Próximo"}
+            </button>
           </div>
         </div>
       </div>
