@@ -33,6 +33,7 @@ export default function Home() {
           { label: "Fontes", href: "#fontes" },
           { label: "Resultado", href: "#resultado" },
           { label: "Documentos", href: "#documentos" },
+          { label: "Tutorial", href: "/tutorial" },
         ]}
       />
 
