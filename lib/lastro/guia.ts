@@ -136,8 +136,16 @@ export const GUIA_ADMINISTRADORAS: GuiaAdministradora[] = [
   },
 ];
 
+const chave = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+
 /** O guia da administradora pelo nome da pasta (ex.: "AZUMI", "Planner"); null se não houver. */
 export function guiaDaAdministradora(nome: string): GuiaAdministradora | null {
-  const n = nome.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+  const n = chave(nome);
   return GUIA_ADMINISTRADORAS.find((g) => g.chaves.includes(n)) ?? null;
+}
+
+/** O nome da administradora como o guia escreve, mesmo num guia de várias (ex.: "VERT" → "Vert", em "América, Ativa, MF Pepper e Vert"). */
+export function nomeNoGuia(g: GuiaAdministradora, nome: string): string {
+  const semEspaco = (s: string) => chave(s).replace(/\s+/g, "");
+  return g.nome.split(/, | e /).find((parte) => semEspaco(parte) === semEspaco(nome)) ?? g.nome;
 }

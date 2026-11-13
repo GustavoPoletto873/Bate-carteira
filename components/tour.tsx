@@ -108,7 +108,7 @@ function vizinho(de: number, sentido: 1 | -1): number | null {
   return null;
 }
 
-/** Tour guiado: destaca cada bloco da tela e explica para que serve. Abre pelo botão, pelo menu (#tour) ou por evento. */
+/** Tour guiado: destaca cada bloco da tela e explica para que serve. Abre pelo botão ou pelo link #tour (menu e tutorial). */
 export function Tour() {
   const [passo, setPasso] = useState<number | null>(null);
   const [caixa, setCaixa] = useState<Caixa | null>(null);
@@ -122,22 +122,17 @@ export function Tour() {
     setCaixa({ top: Math.max(8, r.top - 6), left: Math.max(8, r.left - 6), width: Math.min(r.width + 12, window.innerWidth - 16), height: altura + 12 });
   }, [passo]);
 
-  // abre pelo link do menu (#tour) ou pelo evento "lastro:tour"
+  // abre pelo link do menu e do tutorial (#tour)
   useEffect(() => {
-    const abrir = () => setPasso(vizinho(-1, 1));
     const peloHash = () => {
       if (window.location.hash === "#tour") {
         history.replaceState(null, "", window.location.pathname);
-        abrir();
+        setPasso(vizinho(-1, 1));
       }
     };
     peloHash();
     window.addEventListener("hashchange", peloHash);
-    window.addEventListener("lastro:tour", abrir);
-    return () => {
-      window.removeEventListener("hashchange", peloHash);
-      window.removeEventListener("lastro:tour", abrir);
-    };
+    return () => window.removeEventListener("hashchange", peloHash);
   }, []);
 
   // leva a tela até o bloco do passo e mede de novo depois da rolagem
@@ -200,10 +195,11 @@ export function Tour() {
   const total = visiveis.filter(Boolean).length;
   // o balão fica embaixo do bloco; sem espaço, em cima; sem bloco na tela, no centro
   const embaixo = caixa ? caixa.top + caixa.height + 190 < window.innerHeight : false;
+  const larguraBalao = Math.min(360, window.innerWidth - 24); // a mesma do w-[min(22.5rem,calc(100vw-1.5rem))]
   const estiloBalao: React.CSSProperties = !caixa
     ? { top: "50%", left: "50%", transform: "translate(-50%, -50%)" }
     : {
-      left: Math.min(Math.max(12, caixa.left), window.innerWidth - 372),
+      left: Math.max(12, Math.min(caixa.left, window.innerWidth - larguraBalao - 12)),
       ...(embaixo ? { top: caixa.top + caixa.height + 12 } : caixa.top > 200 ? { top: Math.max(12, caixa.top - 12), transform: "translateY(-100%)" } : { bottom: 16 }),
     };
 

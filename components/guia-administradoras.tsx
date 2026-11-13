@@ -2,7 +2,7 @@
 
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
-import { ESTADO_FONTE, GUIA_ADMINISTRADORAS, guiaDaAdministradora, type EstadoFonte, type GuiaAdministradora } from "@/lib/lastro/guia";
+import { ESTADO_FONTE, GUIA_ADMINISTRADORAS, guiaDaAdministradora, nomeNoGuia, type EstadoFonte, type GuiaAdministradora } from "@/lib/lastro/guia";
 import { cn } from "@/lib/utils";
 
 export function SeloFonte({ estado }: { estado: EstadoFonte }) {
@@ -71,7 +71,7 @@ export function DicaAdministradora({ nome }: { nome: string }) {
   return (
     <details className="group rounded-xl bg-creme/[0.03] ring-1 ring-creme/10" data-tour="dica-administradora">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-creme/60">
-        <span className="min-w-0 flex-1 truncate">Como funciona na {g.nome.split(",")[0]}</span>
+        <span className="min-w-0 flex-1 truncate">Como funciona na {nomeNoGuia(g, nome)}</span>
         {g.fontes.some((f) => f.estado === "nao") && <SeloFonte estado="nao" />}
         <ChevronDown className="size-3.5 shrink-0 transition-transform group-open:rotate-180" />
       </summary>
