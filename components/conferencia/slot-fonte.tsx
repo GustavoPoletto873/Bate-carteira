@@ -95,6 +95,7 @@ export function SlotFonte({
       }}
       onDragLeave={() => setArrastando(false)}
       onDrop={aoSoltar}
+      data-tour={`cartao-${numero}`}
       className={cn(
         "group relative flex flex-col gap-4 rounded-2xl border bg-card p-5 transition-colors md:p-6",
         arrastando ? "border-creme/60 bg-creme/[0.04]" : "border-border",

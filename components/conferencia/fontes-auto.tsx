@@ -4,6 +4,7 @@ import { FileSpreadsheet, FolderOpen, Landmark, Loader2, Search } from "lucide-r
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArquivoEntrada } from "@/lib/lastro/pipeline";
 import { opcoesDeCarteira, type OpcaoCarteira } from "@/lib/lastro/carteiras";
+import { DicaAdministradora } from "@/components/guia-administradoras";
 import { dataDoTrimestre, type Administradora, type ProvedorDrive } from "@/lib/lastro/drive-comum";
 import { lerWorkpaper, workpaperDaAmostra, type Workpaper } from "@/lib/lastro/planilhas";
 import {
@@ -366,6 +367,7 @@ export function FontesAuto({ status, provedor, basePadrao, acoes, onMudar }: Pro
               </select>
             </label>
           )}
+          <DicaAdministradora nome={adms.find((a) => a.base === baseAplicada)?.nome ?? nomeDaPasta(baseAplicada)} />
           <SeletorFundo
             fundos={fundos?.lista ?? []}
             carregando={carregandoFundos}

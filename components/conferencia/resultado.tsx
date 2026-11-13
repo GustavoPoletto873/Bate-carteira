@@ -493,7 +493,7 @@ function Bloco({ tom, titulo, n, descricao, aberto, children }: {
   tom: keyof typeof TOM_BLOCO; titulo: string; n: number; descricao: string; aberto?: boolean; children: React.ReactNode;
 }) {
   return (
-    <details className={cn("group rounded-2xl border bg-card", TOM_BLOCO[tom].borda)} open={aberto}>
+    <details data-tour={`bloco-${tom}`} className={cn("group rounded-2xl border bg-card", TOM_BLOCO[tom].borda)} open={aberto}>
       <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-4">
         <span className={cn("size-2.5 shrink-0 rounded-full", TOM_BLOCO[tom].ponto)} />
         <span className="min-w-0 flex-1">
@@ -583,7 +583,7 @@ export function Resultado({ resultado, onBaixar, baixando }: {
           />
         </div>
         {r.docs.length > 0 && (
-          <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+          <div className="flex flex-wrap gap-2 self-start sm:self-auto" data-tour="acoes">
             <button type="button" onClick={() => abrirBater(null)} className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-creme/80 ring-1 ring-creme/20 hover:bg-creme/[0.06]">
               <FileSearch className="size-4" /> Buscar nos PDFs
             </button>

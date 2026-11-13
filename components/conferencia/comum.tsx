@@ -49,7 +49,7 @@ export function Cartao({ numero, titulo, icone, descricao, pronto, children }: {
   numero: string; titulo: string; icone: ReactNode; descricao: ReactNode; pronto?: boolean; children?: ReactNode;
 }) {
   return (
-    <div className={cn("flex flex-col gap-4 rounded-2xl border bg-card p-5 md:p-6", pronto ? "border-creme/25" : "border-border")}>
+    <div data-tour={`cartao-${numero}`} className={cn("flex flex-col gap-4 rounded-2xl border bg-card p-5 md:p-6", pronto ? "border-creme/25" : "border-border")}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="flex size-10 items-center justify-center rounded-full bg-creme/8 text-creme">{icone}</span>
