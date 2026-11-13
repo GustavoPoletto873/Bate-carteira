@@ -1,4 +1,5 @@
 import { Conferencia } from "@/components/conferencia/conferencia";
+import { Tour } from "@/components/tour";
 import { PrismaHero, WordsPullUp } from "@/components/ui/prisma-hero";
 
 const PASSOS = [
@@ -33,6 +34,7 @@ export default function Home() {
           { label: "Fontes", href: "#fontes" },
           { label: "Resultado", href: "#resultado" },
           { label: "Documentos", href: "#documentos" },
+          { label: "Tour guiado", href: "#tour" },
           { label: "Tutorial", href: "/tutorial" },
         ]}
       />
@@ -60,6 +62,7 @@ export default function Home() {
       </section>
 
       <Conferencia />
+      <Tour />
     </main>
   );
 }

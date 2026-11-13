@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Lastro — Bate carteira Britech",
+  title: "Bate carteira",
   description:
     "Confere VL Aplic., datas de emissão e vencimento e emissor da carteira Britech contra o workpaper e os documentos de lastro e termo do fundo.",
 };

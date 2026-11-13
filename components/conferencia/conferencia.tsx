@@ -195,7 +195,7 @@ export function Conferencia() {
   function barra(preparo: Preparo | null) {
     const pronto = !!preparo && !progresso;
     return (
-      <div className="mt-8 flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 md:flex-row md:items-center md:justify-between md:p-6">
+      <div data-tour="conferir" className="mt-8 flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 md:flex-row md:items-center md:justify-between md:p-6">
         <div className="min-w-0 flex-1 space-y-2">
           {progresso ? (
             <>
@@ -238,7 +238,7 @@ export function Conferencia() {
           <h2 className="text-[16vw] font-medium leading-[0.85] tracking-[-0.06em] text-creme md:text-[9vw]">
             <WordsPullUp text="Fontes" />
           </h2>
-          <div className="w-full max-w-md space-y-3">
+          <div className="w-full max-w-md space-y-3" data-tour="modo">
             <Alternador
               valor={modo}
               onMudar={(m) => {
